@@ -1,0 +1,12 @@
+"numpy",
+"scipy",
+"shapely",
+"networkx",
+"scikit-image",
+"more-itertools",
+"pillow",
+"matplotlib",
+"python-constraint",
+"ortools",
+"z3-solver",
+"coverage"

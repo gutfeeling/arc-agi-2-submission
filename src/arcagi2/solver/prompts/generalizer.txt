@@ -1,0 +1,56 @@
+You are an expert ARC AGI puzzle solver. Based on the training examples, we have written a python function `solution(grid: list[list[int]]) -> list[list[int]]` that correctly maps all training example inputs to their corresponding outputs. The tests often test the ability to apply the *same core rule* derived from the training examples in *new circumstances* unseen in training. In other words, **the core mechanic will stay the same**, but its *context* or *parameters* may change in the test.
+
+Some examples of adaptation (far from exclusive) that tests require:
+- **Color:** the same rule applies but with different colors.
+- **Directionality:** a vertical operation becomes horizontal.
+- **Numbers:** the number of objects, repetitions, or links changes.
+- **Cases:** multiple distinct cases are combined into one input.
+- **Location:** relevant elements appear in new positions.
+
+Therefore, the `solution` that works on the training examples needs adaptation.
+
+# Your task
+
+You will be given:
+
+- a puzzle to solve
+- a `solution(grid: list[list[int]]) -> list[list[int]]` function that successfully maps all training example inputs to their corresponding outputs. The solution was derived solely based on the training examples. It hasn't been adapated to the test inputs yet.
+
+Based on this information, your task is the following:
+
+- Describe the adaptation being tested by the tests. How does it change the *context* or *parameters* of the core transformation encoded in `solution` which demand adaptation? Which assumptions that held for all the training examples (and hence encoded in `solution`) no longer hold for the test input(s).
+- Generalize `solution` so that it is adapted to the changed circumstances in test(s) and will produce the correct test output.
+
+# Task aids
+
+You may execute code in the Jupyter notebook environment.
+
+Variables and functions available in the Jupyter notebook:
+
+- `puzzle`: A Python `dict` containing the training and test grids. The key "train" contains the training examples in a list. Similarly, the key "test" contains the test examples as a list. Each training/test example is a dict containing keys "input" and "output". The values are the grids expressed as list of lists of integers (0 - 9). Access: `puzzle["train"][i]["input"]`, `puzzle["train"][i]["output"]`, `puzzle["test"][j]["input"]`.{{solution_description}}
+
+Your very first code execution should be `globals.keys()` to check data access. 
+
+Don't print the `puzzle` dict, because it prints out the grids that are already present in this user message and consumes valuable token budget.
+
+# Output format
+
+Output exactly the following two subsections.
+
+## Adaptation being tested by the tests 
+
+In this subsection, describe the adaptation being tested by the tests. How does it change the *context* or *parameters* of the core transformation encoded in `solution` which demand adaptation? Which assumptions that held for all the training examples (and hence encoded in `solution`) no longer hold for the test input(s).
+
+## Adapted solution
+
+In this subsection, please output a single Python code block fenced by ```python ... ```. The code block must include the `solution` function adapted to the test input(s). It must be self-contained i.e. include all necessary imports and helper functions.
+
+# Puzzle to solve
+
+{{puzzle}}
+
+# Existing `solution` that works on all training examples, but not yet adapted to test(s)
+
+```python
+{{solution}}
+```

@@ -1,0 +1,128 @@
+name: Build & Push multi-arch patched vLLM image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/vllm_patch/**"
+      - ".github/workflows/**"
+  workflow_dispatch: {}  # allows manual run from any branch
+
+permissions:
+  contents: read
+  packages: write   # needed to push to GHCR
+
+env:
+  IMAGE_NAME: vllm-openai
+  IMAGE_TAG: v0.11.0-submission-patch
+
+jobs:
+  # ------------------------------------------------------------
+  # amd64 build
+  # ------------------------------------------------------------
+  build-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Free space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
+          docker system prune -af || true
+          docker builder prune -af || true
+          df -h
+
+      - name: Lowercase owner (GHCR requires lowercase)
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/vllm_patch
+          push: true
+          platforms: linux/amd64
+          tags: ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64
+          cache-from: type=gha,scope=vllm-amd64
+          cache-to: type=gha,mode=max,scope=vllm-amd64
+
+  # ------------------------------------------------------------
+  # arm64 build
+  # ------------------------------------------------------------
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Aggressive cleanup
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
+          docker system prune -af || true
+          docker builder prune -af || true
+          df -h
+
+      - name: Lowercase owner (GHCR requires lowercase)
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push arm64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/vllm_patch
+          push: true
+          platforms: linux/arm64
+          tags: ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
+          cache-from: type=gha,scope=vllm-arm64
+          cache-to: type=gha,mode=max,scope=vllm-arm64
+
+  # ------------------------------------------------------------
+  # Merge manifests (multi-arch final image)
+  # ------------------------------------------------------------
+  merge-manifest:
+    needs: [build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lowercase owner (GHCR requires lowercase)
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge manifests into multi-arch tag
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64 \
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
+
+      - name: Verify manifest list
+        run: |
+          docker buildx imagetools inspect ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}

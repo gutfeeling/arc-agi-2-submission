@@ -1,0 +1,66 @@
+You are an expert ARC AGI puzzle solver. Please solve the puzzle given below.
+
+# Background information about ARC AGI puzzles
+
+Each task consists of a small number of demonstration examples (3.3 on average), and a small number of test examples (1 - 3).
+
+Each example consists of an “input grid” and an “output grid”. Each “grid” is a literal grid of colored squares There are 10 unique colors. A grid can be any height or width between 1x1 and 30x30, inclusive.
+
+The color code is as follows:
+
+0 - black
+1 - navy blue
+2 - red
+3 - green
+4 - yellow
+5 - gray
+6 - pink
+7 - orange
+8 - sky blue
+9 - maroon
+
+When solving an evaluation task, a test-taker has access to the training examples for the task (both the input and output grids), as well as the input grid of the test examples for the task. The test-taker must construct on its own the output grid corresponding to the input grid of each test example. “Constructing the output grid” is done entirely from scratch, meaning that the test-taker must decide what the height and width of the output grid should be, what colors they should place on the grid, and where. The task is successfully solved if the test-taker can produce the exact correct answer on all test examples for the task (binary measure of success).
+
+The mapping from integers (0-9) to color names is arbitrary and should be treated as categorical labels; the transformation rule never relies on the specific integer–color pairing.
+
+ARC AGI puzzle solutions feel "natural" to humans. Natural rules tend to build on visual priors and small-number counting. They are visually immediate or prominent for humans. That is why humans from all educational backgrounds are able to solve these puzzles. Rules that depend on non-visual considerations (e.g. mathematics that's more advanced than small number counting) or inelegant mechanics (e.g. tie-breakers, complex conditional rules, special exceptions) are considered "unnatural."  
+
+This doesn't mean puzzles have to be simple or easy. Common patterns that puzzles use to increase difficulty are:  
+
+- **Rule composition:** multiple simple, natural rules are applied in sequence, with one transformation setting up the next.
+- **Contextual application:** a simple if/else based on a visually clear feature.
+- **In-grid symbol definition:** certain shapes or patterns act as symbols whose meaning is established using the training examples and which control some aspect of the transformation. The meaning can even vary across training examples.
+- **Iterated steps:** a simple action is applied repeatedly (as in assembling pieces of a jigsaw), where each step constrains the next. Repetition is restricted to a small number.
+- **Approximate features**: Features that are easily detected by humans, but hard to detect using naive algorithms. Examples are slightly broken symmetry, slightly broken continuity, off-center symmetry axes, objects defined via 8-connectivity etc.
+- **Non-locality:** the solution requires applying changes to one region, with the changes depending on features in a different, distant region.
+
+# Puzzle to solve
+
+{{puzzle}}
+
+# Task aids
+
+You may execute code in the Jupyter notebook environment.
+
+Variables available in the Jupyter notebook:
+
+- `puzzle`: A Python `dict` containing the training and test grids. The key "train" contains the training examples in a list. Similarly, the key "test" contains the test examples as a list. Each training/test example is a dict containing keys "input" and "output". The values are the grids expressed as list of lists of integers (0 - 9). Access: `puzzle["train"][i]["input"]`, `puzzle["train"][i]["output"]`, `puzzle["test"][j]["input"]`.
+
+Your very first code execution should be `puzzle.keys()` to check data access. 
+
+Don't print the `puzzle` dict, because it prints out the grids that are already present in this user message and consumes valuable token budget.
+
+# Your task
+
+Please solve the puzzle. Solving the puzzle means constructing a function `solution(grid: list[list[int]])` that implements the transformation from input grid to output grid shown in the training examples. The solution must work on all training examples.
+
+```
+for idx, example in enumerate(puzzle["train"]):
+    assert solution(example["input"]) == example["output"], f"Train example {idx}: mismatch"
+```
+
+The solution must generalize to the test input(s). Solutions that cheat by hardcoding the training example outputs are not acceptable.
+
+# Output format (STRICT)
+
+Your response must contain a single Python code block fenced by ```python ... ```. Must include a `solution` function. Must be self-contained i.e. include all necessary imports and helper functions.
