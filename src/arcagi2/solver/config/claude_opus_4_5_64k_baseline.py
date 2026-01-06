@@ -7,6 +7,7 @@ PLAIN_COT_SOLVER = AsyncMessagesAPIClient.MessagesAPICallConfig(
     model="claude-opus-4-5-20251101",
     api_provider=ANTHROPIC_API_PROVIDER,
     prompt_path = PROMPTS_FOLDER / "plain_cot_solver.txt",
+    system_prompt_path=None,
     client_kwargs = {
         "max_retries": 0,
     },
@@ -16,7 +17,8 @@ PLAIN_COT_SOLVER = AsyncMessagesAPIClient.MessagesAPICallConfig(
             "budget_tokens": 63999,
         },
         "max_tokens": 64000,
-    }
+    },
+    cache_ttl=None
 )
 
 CLAUDE_OPUS_4_5_64K_BASELINE_CONFIG = BaselineConfig(

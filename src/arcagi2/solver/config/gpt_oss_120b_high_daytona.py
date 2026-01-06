@@ -1,6 +1,7 @@
 from arcagi2.api.clients import AsyncResponsesAPIClient
 from arcagi2.api.providers import VLLM_API_PROVIDER
-from arcagi2.solver.config.base import InterleavedThinkingConfig, PROMPTS_FOLDER, IPYBOX_SANDBOX_CLS, IPYBOX_SANDBOX_KWARGS
+from arcagi2.sandbox.daytona_sandbox import DaytonaSandbox
+from arcagi2.solver.config.base import InterleavedThinkingConfig, PROMPTS_FOLDER, DAYTONA_SANDBOX_CLS, DAYTONA_SANDBOX_KWARGS
 from arcagi2.tools.repl_tool import REPLToolWithProtection
 
 
@@ -17,8 +18,8 @@ _COMMON_KWARGS = dict(
     tools=[REPLToolWithProtection(name="python", timeout=120, protected_variables=["puzzle"])],
     max_retries=2,
     sleep=0,
-    sandbox_cls=IPYBOX_SANDBOX_CLS,
-    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
+    sandbox_cls=DAYTONA_SANDBOX_CLS,
+    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
     initial_code_timeout=120,
     stateful=False,
 )
@@ -38,9 +39,9 @@ GENERALIZER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
     prompt_path=PROMPTS_FOLDER / "generalizer.txt"
 )
 
-GPT_OSS_120B_HIGH_SYSTEM_CONFIG = InterleavedThinkingConfig(
-    sandbox_cls=IPYBOX_SANDBOX_CLS,
-    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
+GPT_OSS_120B_HIGH_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
+    sandbox_cls=DAYTONA_SANDBOX_CLS,
+    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
     interleaved_thinking_solver=INTERLEAVED_THINKING_SOLVER,
     soft_verifier=SOFT_VERIFIER,
     generalizer=GENERALIZER,

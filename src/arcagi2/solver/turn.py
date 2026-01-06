@@ -1,10 +1,11 @@
+from abc import ABC, abstractmethod
 import asyncio
 from dataclasses import dataclass, asdict
 import json
 import logging
 from pathlib import Path
 import re
-from typing import Callable, Union
+from typing import Callable, Optional
 
 from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
@@ -23,8 +24,10 @@ from arcagi2.api.exceptions import (
     InvalidMessageException,
     InvalidResponseException
 )
-from arcagi2.solver.exceptions import InvalidTurnResult, MaxRetriesExceeded
-from arcagi2.tools.code_interpreter_ipybox import IPyBox
+from arcagi2.exceptions import MaxRetriesExceeded
+from arcagi2.sandbox.exceptions import SandboxInfrastructureError
+from arcagi2.solver.exceptions import InvalidTurnResult
+from arcagi2.tools.repl_tool import REPLTool
 from arcagi2.utils.utils import (
     get_code_matches, 
     save_jsonl, 
@@ -37,15 +40,17 @@ from arcagi2.utils.utils import (
 logger = logging.getLogger(__name__)
 
 
-class AbstractTurn:
+class AbstractTurn(ABC):
     @dataclass
-    class AbstractParsedTurnResult:
+    class AbstractParsedTurnResult(ABC):
         trace: list[str]
         
         @classmethod
+        @abstractmethod
         def from_turn_result(cls, result: TurnResult) -> "AbstractTurn.AbstractParsedTurnResult":
-            raise NotImplementedError("Subclasses must implement this method")
+            pass
 
+        @abstractmethod
         def save_to_dir(self, dir: Path, config: AbstractAPIClient.CallConfig):
             dir.mkdir(parents=True, exist_ok=True)
             if self.trace is not None:
@@ -58,7 +63,7 @@ class AbstractTurn:
                     logger.info(f"Saving COT to {cot_file_path}")
                     code_interpreter_tool_name = None
                     for tool in config.tools:
-                        if isinstance(tool, IPyBox):
+                        if isinstance(tool, REPLTool):
                             code_interpreter_tool_name = tool.name
                     save_text(
                         config.client_class.get_readable_trace(
@@ -88,26 +93,31 @@ class AbstractTurn:
             self, 
             config: AbstractAPIClient.CallConfig, 
             max_retries: int, 
-            base_delay: int=2, 
-            max_delay: int=600
+            base_delay: int,
+            delay_multiplier: float,
+            max_delay: int,
+            max_backoff_retries: int,
             ):
         self.config = config
         self.max_retries = max_retries
         self.base_delay = base_delay
+        self.delay_multiplier = delay_multiplier
         self.max_delay = max_delay
+        self.max_backoff_retries = max_backoff_retries
 
     async def _with_retry(self, func: Callable, **kwargs) -> "AbstractTurn.AbstractParsedTurnResult":
         """
         Robust retry logic
         
-        - Limited retries (up to max_retries) for incomplete responses  bad request errors
+        - Limited retries (up to max_retries) for incomplete responses and bad request errors
         - Limited retries (up to max_retries) for invalid turn results
-        - Unlimited retries with exponential backoff for: connection errors, rate limits, timeouts
+        - Unlimited retries with exponential backoff (up to max_backoff_retries) for: connection errors, rate limits, timeouts
         
         Returns ParsedTurnResult.
         Raises MaxRetriesExceeded if all retries fail.
         """
         attempt = 0
+        backoff_attempt = 0
         delay = self.base_delay
         while True:
             if attempt > 0:
@@ -120,15 +130,15 @@ class AbstractTurn:
                 InvalidMessageException,
                 AnthropicBadRequestError,
                 OpenAIBadRequestError,
-            ):
+            ) as e:
                 if attempt < self.max_retries:
                     attempt += 1
                     delay = self.base_delay
-                    logger.exception("Limited retry error, retrying...")
+                    logger.exception("Avoidable model failure, retrying...")
                     continue
                 else:
-                    logger.exception(f"Failed to get response after {self.max_retries} retries (for limited retry error)")
-                    raise MaxRetriesExceeded(f"Failed to get response after {self.max_retries} retries (for limited retry error)")
+                    logger.exception(f"Failed to get response after {self.max_retries} retries (for avoidable model failure)")
+                    raise MaxRetriesExceeded(f"Failed to get response after {self.max_retries} retries (for avoidable model failure)") from e
             except (
                 OpenAIAPIConnectionError,
                 AnthropicAPIConnectionError,
@@ -136,15 +146,21 @@ class AbstractTurn:
                 AnthropicRateLimitError,
                 OpenAIAPITimeoutError,
                 AnthropicAPITimeoutError,
-                httpx.TimeoutException,  # Catches ReadTimeout, WriteTimeout, ConnectTimeout, PoolTimeout
-            ):
-                # AnthropicAPITimeoutError: We use streaming for anthropic, so timeout errors
-                # are not due to long thinking. We can safely retry with exponential backoff.
-                # httpx.TimeoutException: Can leak through during streaming when OpenAI SDK doesn't wrap it.
-                logger.exception("Unlimited retry error, retrying with exponential backoff...")
-                delay = min(delay * 2, self.max_delay)
-                await asyncio.sleep(delay)
-                continue
+                httpx.TimeoutException,  # Catches ReadTimeout, WriteTimeout, ConnectTimeout, PoolTimeout,
+                SandboxInfrastructureError,
+            ) as e:
+                if backoff_attempt < self.max_backoff_retries:
+                    # AnthropicAPITimeoutError: We use streaming for anthropic, so timeout errors
+                    # are not due to long thinking. We can safely retry with exponential backoff.
+                    # httpx.TimeoutException: Can leak through during streaming when OpenAI SDK doesn't wrap it.
+                    logger.exception("Infrastructure error, retrying with exponential backoff...")
+                    await asyncio.sleep(delay)
+                    delay = min(delay * self.delay_multiplier, self.max_delay)
+                    backoff_attempt += 1
+                    continue
+                else:
+                    logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)")
+                    raise MaxRetriesExceeded(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)") from e
             try:
                 return self.PARSED_TURN_RESULT_CLS.from_turn_result(result)
             except InvalidTurnResult as e:
@@ -156,7 +172,7 @@ class AbstractTurn:
                     continue
                 else:
                     logger.exception(f"Failed to get response after {self.max_retries} retries (for limited retry error)")
-                    raise MaxRetriesExceeded(f"Failed to get response after {self.max_retries} retries (for limited retry error)")
+                    raise MaxRetriesExceeded(f"Failed to get response after {self.max_retries} retries (for limited retry error)") from e
 
     @staticmethod
     def _validate_prompt(prompt: str) -> None:
@@ -176,28 +192,19 @@ class AbstractTurn:
     async def run(
             self, 
             prompt_template_vars: dict[str, str], 
-            use_tools: bool, 
-            save_to_dir: Union[Path, None]=None, 
-            **kwargs
+            save_to_dir: Optional[Path] = None, 
+            initial_code: Optional[list[str]] = None,
             ) -> "AbstractTurn.AbstractParsedTurnResult":
         prompt = self._render_prompt(prompt_template_vars)
         logger.info(f"Prompt:\n{prompt}")
-        if use_tools:
-            func = self.config.client_class.call_with_tools
-        else:
-            func = self.config.client_class.call_without_tools
         parsed_turn_result = await self._with_retry(
-            func, 
+            self.config.client_class.call, 
             messages=[{"role": "user", "content": prompt}], 
-            **kwargs
+            initial_code=initial_code,
         )
         if save_to_dir is not None:
             parsed_turn_result.save_to_dir(save_to_dir, self.config)
         return parsed_turn_result
-
-    async def run_cells(self, cells):
-        # TODO: Implement this
-        pass
 
 class CodeSolutionTurn(AbstractTurn):
     """

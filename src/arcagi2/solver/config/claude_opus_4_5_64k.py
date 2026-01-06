@@ -1,73 +1,54 @@
 from arcagi2.api.clients import AsyncMessagesAPIClient
 from arcagi2.api.providers import ANTHROPIC_API_PROVIDER
-from arcagi2.solver.config.base import SystemConfig, PROMPTS_FOLDER
-from arcagi2.tools.code_interpreter_ipybox import IPyBoxWithProtection
+from arcagi2.sandbox.ipybox_sandbox import IPyBoxSandbox
+from arcagi2.solver.config.base import InterleavedThinkingConfig, PROMPTS_FOLDER, IPYBOX_SANDBOX_CLS, IPYBOX_SANDBOX_KWARGS
+from arcagi2.tools.repl_tool import REPLToolWithProtection
 
 
-INTERLEAVED_THINKING_SOLVER = AsyncMessagesAPIClient.MessagesAPICallConfig(
+# Our Anthropic client streams by default. For streaming requests, we handle all retries explicitly in our code.
+# So turning off automatic retries here.
+_COMMON_KWARGS = dict(
     model="claude-opus-4-5-20251101",
     api_provider=ANTHROPIC_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "interleaved_thinking_solver.txt",
-    # Our Anthropic client streams by default. For streaming requests, we handle all retries explicitly in our code.
-    # So turning off automatic retries here.
-    client_kwargs = {
-        "max_retries": 0,
+    client_kwargs={
+        "max_retries": 0
     },
-    system_prompt_path = PROMPTS_FOLDER / "system_prompt.txt",
-    tools=[IPyBoxWithProtection(protected_variables=["puzzle"], name="python")],
-    raw_request_kwargs = {
+    system_prompt_path=PROMPTS_FOLDER / "system_prompt.txt",
+    raw_request_kwargs={
         "thinking": {
-            "type": "enabled",
-            "budget_tokens": 200_000,
+            "type": "enabled", 
+            "budget_tokens": 200_000
         },
         "betas": ["interleaved-thinking-2025-05-14"],
         "max_tokens": 64000
     },
-    max_retries=2
+    tools=[REPLToolWithProtection(name="python", timeout=120, protected_variables=["puzzle"])],
+    max_retries=2,
+    sleep=0,
+    sandbox_cls=IPYBOX_SANDBOX_CLS,
+    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
+    initial_code_timeout=120,
+    cache_ttl="5m"
+)
+
+INTERLEAVED_THINKING_SOLVER = AsyncMessagesAPIClient.MessagesAPICallConfig(
+    **_COMMON_KWARGS,
+    prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
 )
 
 SOFT_VERIFIER = AsyncMessagesAPIClient.MessagesAPICallConfig(
-    model="claude-opus-4-5-20251101",
-    api_provider=ANTHROPIC_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "soft_verifier.txt",
-    client_kwargs = {
-        "max_retries": 0,
-    },
-    system_prompt_path = PROMPTS_FOLDER / "system_prompt.txt",
-    tools=[IPyBoxWithProtection(protected_variables=["train"], name="python")],
-    raw_request_kwargs = {
-        "thinking": {
-            "type": "enabled",
-            "budget_tokens": 200_000,
-        },
-        "betas": ["interleaved-thinking-2025-05-14"],
-        "max_tokens": 64000,
-    },
-    max_retries=2
+    **_COMMON_KWARGS,
+    prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
 )
 
 GENERALIZER = AsyncMessagesAPIClient.MessagesAPICallConfig(
-    model="claude-opus-4-5-20251101",
-    api_provider=ANTHROPIC_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "generalizer.txt",
-    client_kwargs = {
-        "max_retries": 0,
-    },
-    system_prompt_path = PROMPTS_FOLDER / "system_prompt.txt",
-    tools=[IPyBoxWithProtection(protected_variables=["puzzle"], name="python")],
-    raw_request_kwargs = {
-        "thinking": {
-            "type": "enabled",
-            "budget_tokens": 200_000,
-        },
-        "betas": ["interleaved-thinking-2025-05-14"],
-        "max_tokens": 64000,
-    },
-    max_retries=2
+    **_COMMON_KWARGS,
+    prompt_path=PROMPTS_FOLDER / "generalizer.txt"
 )
 
-CLAUDE_OPUS_4_5_64K_SYSTEM_CONFIG = SystemConfig(
-    code_sandbox_container_tag="ipybox:solver",
+CLAUDE_OPUS_4_5_64K_SYSTEM_CONFIG = InterleavedThinkingConfig(
+    sandbox_cls=IPYBOX_SANDBOX_CLS,
+    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
     interleaved_thinking_solver=INTERLEAVED_THINKING_SOLVER,
     soft_verifier=SOFT_VERIFIER,
     generalizer=GENERALIZER,

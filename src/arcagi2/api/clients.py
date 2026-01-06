@@ -1,21 +1,17 @@
+from abc import ABC, abstractmethod
 import asyncio
-import contextlib
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Union
+from typing import Optional, Self, Union, Type
+from arcagi2.sandbox.base import Sandbox
 
 import anthropic
 from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic.types.beta import BetaMessage
-# USE_DAYTONA=True: Daytona cloud sandboxes, False (default): ipybox Docker
-if os.getenv("USE_DAYTONA", "False") == "True":
-    from arcagi2.tools.execution_client_daytona import ExecutionClient, ExecutionContainer, ExecutionError
-else:
-    from ipybox import ExecutionClient, ExecutionContainer, ExecutionError
 from jsonschema.exceptions import ValidationError
 from openai import AsyncOpenAI
 from openai import BadRequestError as OpenAIBadRequestError
@@ -30,10 +26,10 @@ from arcagi2.api.exceptions import (
 )
 from arcagi2.api.providers import APIProvider
 from arcagi2.api.utils import replace_developer_message, messages_contains_system_prompt
+from arcagi2.sandbox.base import REPL, Sandbox
 from arcagi2.tools.base import Tool
-from arcagi2.tools.code_interpreter_ipybox import IPyBox
-from arcagi2.utils.ipybox_utils import ensure_container
-from arcagi2.utils.utils import read_file
+from arcagi2.tools.repl_tool import REPLTool
+from arcagi2.utils.utils import read_file, SerializableDataclassMixin
 
 
 logger = logging.getLogger(__name__)
@@ -52,12 +48,12 @@ class TurnResult:
 
 @dataclass
 class TokenConsumption:
-    input: int = 0
-    output: int = 0
-    cached_input: int = 0    # default values for backward compatibility, when we didn't have cached_input
-    total: int = 0
+    input: int
+    output: int
+    cached_input: int
+    total: int
     
-    def __add__(self, other):
+    def __add__(self, other: "TokenConsumption") -> "TokenConsumption":
         if isinstance(other, TokenConsumption):
             return TokenConsumption(
                 input=self.input + other.input,
@@ -67,7 +63,7 @@ class TokenConsumption:
             )
         return NotImplemented
     
-    def __iadd__(self, other):
+    def __iadd__(self, other: "TokenConsumption") -> Self:
         if isinstance(other, TokenConsumption):
             self.input += other.input
             self.output += other.output
@@ -76,7 +72,7 @@ class TokenConsumption:
             return self
         return NotImplemented
     
-    def __mul__(self, other):
+    def __mul__(self, other: Union[int, float]) -> "TokenConsumption":
         if isinstance(other, (int, float)):
             return TokenConsumption(
                 input=int(self.input * other),
@@ -86,44 +82,65 @@ class TokenConsumption:
             )
         return NotImplemented
     
-    def __rmul__(self, other):
+    def __rmul__(self, other: Union[int, float]) -> "TokenConsumption":
         return self.__mul__(other)
 
-class AbstractAPIClient:
+class AbstractAPIClient(ABC):
 
     @dataclass
-    class CallConfig:
+    class CallConfig(SerializableDataclassMixin):
         api_provider: APIProvider
         model: str
         prompt_path: Path    # path to the prompt template
+        system_prompt_path: Optional[Path]    # path to the system prompt template
+
         # For non-streaming requests, the client is responsible for retrying timeouts that happens when model thinks too long. 
         # So don't reset `max_retries` in the client_kwargs to 0, unless you really want to disable retrying those.
-        client_kwargs: dict = field(default_factory=dict)   # passed to the API client
-        system_prompt_path: Union[Path, None] = None    # path to the system prompt template
+        client_kwargs: dict
+        
         # kwargs is passed to the API request. Don't pass system prompts here (even though it is allowed in Responses and Messages APIs). 
         # Use the system_prompt_path property instead.
-        raw_request_kwargs: dict = field(default_factory=dict)
+        raw_request_kwargs: dict
 
-        # Tool loop related configs
-        tools: list[Tool] = field(default_factory=list)
-        code_timeout: Union[int, None] = 120
-        max_retries: int = 0
+        # Tool loop related configs; all values should be non-None if tools are provided
+        tools: Optional[list[Tool]] = None
+        # Maximum number of retries that preserve state (i.e. doesn't try to reset the state).
+        max_retries: Optional[int] = None
+        # Sleep time between tool loop steps
+        sleep: Optional[float] = None
+        sandbox_cls: Optional[Type[Sandbox]] = None
+        sandbox_kwargs: Optional[dict] = None
+        initial_code_timeout: Optional[float] = None
 
         @property
-        def prompt(self):
+        def prompt(self) -> str:
             return read_file(self.prompt_path)
 
         @property
-        def system_prompt(self):
+        def system_prompt(self) -> Union[str, None]:
             if isinstance(self.system_prompt_path, Path):
                 return read_file(self.system_prompt_path)
             return self.system_prompt_path
 
         @property
-        def request_kwargs(self):
+        def request_kwargs(self) -> dict:
             return self.raw_request_kwargs
 
-    def __init__(self, api_provider, **kwargs):
+        def __post_init__(self) -> None:
+            if self.tools is not None:
+                if self.max_retries is None:
+                    raise ValueError("max_retries must be provided if tools are provided")
+                if self.sleep is None:
+                    raise ValueError("sleep must be provided if tools are provided")
+                if any(isinstance(tool, REPLTool) for tool in self.tools): 
+                    if self.sandbox_cls is None:
+                        raise ValueError("sandbox_cls must be provided if tools are provided")
+                    if self.sandbox_kwargs is None:
+                        raise ValueError("sandbox_kwargs must be provided if tools are provided")
+                    if self.initial_code_timeout is None:
+                        raise ValueError("initial_code_timeout must be provided if tools are provided")
+
+    def __init__(self, api_provider: APIProvider, **kwargs):
         self.api_provider = api_provider
         api_key = os.getenv(api_provider.api_key_env_var)
         if api_key is None and kwargs.get("api_key") is None:
@@ -134,82 +151,107 @@ class AbstractAPIClient:
             **kwargs
         )
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         # Supports context manager mode, just like the original AsyncOpenAI client
         await self.client.__aenter__()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         return await self.client.__aexit__(exc_type, exc_val, exc_tb)
 
     @classmethod
-    async def call_without_tools(cls, messages, config: CallConfig) -> TurnResult:
-        raise NotImplementedError("Subclasses must implement this method")
+    @abstractmethod
+    async def call(cls, config: CallConfig, messages: list[dict], initial_code: Optional[list[str]] = None) -> TurnResult:
+        pass
 
-    @classmethod
-    async def call_with_tools(cls, messages, container_or_tag, initial_code, config: CallConfig) -> TurnResult:
-        raise NotImplementedError("Subclasses must implement this method")
+    async def ensure_repl_and_run_tool_loop(
+            self,
+            tools: list[Tool],
+            sandbox_cls: Optional[Type[Sandbox]] = None,
+            sandbox_kwargs: Optional[dict] = None,
+            initial_code: Optional[list[str]] = None,
+            initial_code_timeout: Optional[float] = None,
+            **kwargs
+        ) -> RawTurnResult:
+        if any(isinstance(tool, REPLTool) for tool in tools):
+            async with sandbox_cls(**sandbox_kwargs) as sandbox:
+                async with sandbox.create_repl() as repl:
+                    if initial_code is not None and len(initial_code) > 0:
+                        logger.info(f"Running initial code in REPL")
+                        for cell in initial_code:
+                            await repl.execute(
+                                code=cell,
+                                timeout=initial_code_timeout
+                            )
+                        logger.info(f"Initial code in REPL executed successfully")
 
-    @staticmethod
-    def token_consumption_from_response(response):
-        raise NotImplementedError("Subclasses must implement this method")
+                    return await self.run_tool_loop(
+                        tools=tools, 
+                        repl=repl,
+                        **kwargs
+                    )
+        else:
+            return await self.run_tool_loop(
+                tools=tools, 
+                repl=None, 
+                **kwargs
+            )
 
-    @staticmethod
-    def get_token_consumption_from_trace(trace):
-        raise NotImplementedError("Subclasses must implement this method")
+    async def run_tool_loop(self, tools: list[Tool], repl: Optional[REPL], **kwargs) -> RawTurnResult:
+        self._validate_tools(tools)
+        return await self._run_tool_loop(
+            tools=tools,
+            repl=repl,
+            **kwargs
+        )
 
-    @staticmethod
-    def get_max_context_from_trace(trace):
-        raise NotImplementedError("Subclasses must implement this method")
-
-    @staticmethod
-    def get_readable_trace(trace):
-        raise NotImplementedError("Subclasses must implement this method")
-    
-    @staticmethod
-    def validate_tools(tools):
+    def _validate_tools(self, tools: list[Tool]) -> None:
         if not isinstance(tools, list):
             raise ValueError(f"Tools must be a list. Got {type(tools)}")
         if len(tools) == 0:
             raise ValueError(f"Tools list must not be empty")
         for tool in tools:
             if not isinstance(tool, Tool):
-                raise ValueError(f"Tool {tool} must be an instance of Tool. Got {type(tool)}")    
+                raise ValueError(f"Tool {tool} must be an instance of Tool. Got {type(tool)}")
+        num_repl_tools = sum(1 for tool in tools if isinstance(tool, REPLTool))
+        if num_repl_tools > 1:
+            raise ValueError(f"Only one REPL tool is supported. Got {num_repl_tools} REPL tools")
+
+    @abstractmethod
+    def _run_tool_loop(self, tools: list[Tool], repl: Optional[REPL], **kwargs) -> RawTurnResult:
+        pass
 
     @staticmethod
-    def find_tool(name, tools):
+    @abstractmethod
+    def token_consumption_from_response(response: Union[ChatCompletion, Response, BetaMessage]) -> TokenConsumption:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def get_max_context_from_trace(trace: list[str]) -> int:
+        pass
+
+    @staticmethod
+    @abstractmethod
+    def get_readable_trace(trace: list[str]) -> str:
+        pass       
+
+    @staticmethod
+    def _find_tool(name: str, tools: list[Tool]) -> Tool:
         for tool in tools:
             if tool.name == name:
                 return tool
         raise ValueError(f"Tool name {name} not found in tools list {[tool.name for tool in tools]}")
-            
-    @staticmethod
-    async def run_initial_code_ipybox(ipybox_client, initial_code):
-        if len(initial_code) > 0:
-            logger.info(f"Running initial code")
-            for cell in initial_code:
-                try:
-                    logger.info(f"Running initial code cell:\n {cell}")
-                    await ipybox_client.execute(code=cell)
-                    logger.info(f"Cell ran successfully")
-                except ExecutionError as e:
-                    logger.exception(f"An error occurred during initial code execution: {e.trace}")
-                    raise
-            logger.info("Initial code ran successfully")
-        else:
-            logger.info("No initial code to run")
-
-    def tools_contains_ipybox(self, tools):
-        return any(isinstance(tool, IPyBox) for tool in tools)
 
 class AsyncChatCompletionsAPIClient(AbstractAPIClient):
+    """Client for the OpenAI Chat Completions API."""
 
     @dataclass
     class ChatCompletionsAPICallConfig(AbstractAPIClient.CallConfig):
         pass
 
     @classmethod 
-    async def call_without_tools(cls, messages, config):
+    async def call(cls, config: ChatCompletionsAPICallConfig, messages: list[dict], initial_code: Optional[list[str]] = None) -> TurnResult:
         if not isinstance(config, cls.ChatCompletionsAPICallConfig):
             raise ValueError(f"Config must be an instance of {cls.ChatCompletionsAPICallConfig}")
         messages = replace_developer_message(
@@ -217,40 +259,25 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
             system_prompt=config.system_prompt
         )
         async with cls(api_provider=config.api_provider, **config.client_kwargs) as client:
-            result = await client.create_chat_completion(
-                model=config.model,
-                messages=messages,
-                **config.request_kwargs
-            )
-            client.validate_response(result.response)
-            return TurnResult(
-                role=result.response.choices[0].message.role,
-                content=result.response.choices[0].message.content,
-                trace=result.trace
-            )
-
-    @classmethod
-    async def call_with_tools(cls, messages, container_or_tag, initial_code, config):
-        if not isinstance(config, cls.ChatCompletionsAPICallConfig):
-            raise ValueError(f"Config must be an instance of {cls.ChatCompletionsAPICallConfig}")
-        messages = replace_developer_message(
-            messages=messages, 
-            system_prompt=config.system_prompt
-        )
-        async with cls(api_provider=config.api_provider, **config.client_kwargs) as client:
-            async with contextlib.AsyncExitStack() as stack:
-                container = await ensure_container(stack, container_or_tag)
-                result = await client.create_chat_completion_with_tools(
+            if config.tools is None:
+                result = await client.create_chat_completion(
                     model=config.model,
                     messages=messages,
-                    tools=config.tools,
-                    container=container,
-                    initial_code=initial_code,
-                    code_timeout=config.code_timeout,
-                    max_retries=config.max_retries,
                     **config.request_kwargs
                 )
-            
+            else:
+                result = await client.ensure_repl_and_run_tool_loop(
+                    tools=config.tools,
+                    sandbox_cls=config.sandbox_cls,
+                    sandbox_kwargs=config.sandbox_kwargs,
+                    initial_code=initial_code,
+                    initial_code_timeout=config.initial_code_timeout,
+                    model=config.model,
+                    messages=messages,
+                    max_retries=config.max_retries,
+                    sleep=config.sleep,
+                    **config.request_kwargs
+                )
             client.validate_response(result.response)
             return TurnResult(
                 role=result.response.choices[0].message.role,
@@ -259,8 +286,13 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
             )
 
     @staticmethod
-    def get_token_consumption_from_trace(trace):
-        token_consumption = TokenConsumption()
+    def get_token_consumption_from_trace(trace: list[str]) -> TokenConsumption:
+        token_consumption = TokenConsumption(
+            input=0,
+            output=0,
+            cached_input=0,
+            total=0
+        )
         for item in trace:
             try:
                 response = ChatCompletion.model_validate_json(item)
@@ -271,12 +303,12 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
 
     @staticmethod
     def get_readable_trace(
-            trace, 
-            include_interpreter_output=True, 
-            separator="\n\n",
-            include_prompt=False,
-            code_interpreter_tool_name=None
-            ):
+            trace: list[str], 
+            include_interpreter_output: bool = True, 
+            separator: str = "\n\n",
+            include_prompt: bool = False,
+            code_interpreter_tool_name: Optional[str] = None
+            ) -> str:
         # https://huggingface.co/datasets/JoeYing/ReTool-SFT
         text = ""
         if include_prompt:
@@ -327,7 +359,7 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
         return text
 
     @staticmethod
-    def get_max_context_from_trace(trace):
+    def get_max_context_from_trace(trace: list[str]) -> int:
         for item in reversed(trace):
             try:
                 response = ChatCompletion.model_validate_json(item)
@@ -336,10 +368,9 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
             token_consumption = AsyncChatCompletionsAPIClient.token_consumption_from_response(response)
             return token_consumption.total
         return 0
-        
     
     @staticmethod
-    def token_consumption_from_response(response):
+    def token_consumption_from_response(response: ChatCompletion) -> TokenConsumption:
         try:
             cached_input = response.usage.prompt_tokens_details.cached_tokens
         # prompt_token_details might not always be present when using OpenRouter
@@ -357,12 +388,12 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
         )
     
     @staticmethod
-    def validate_response(response):
+    def validate_response(response: ChatCompletion) -> None:
         finish_reason = response.choices[0].finish_reason
         if response.choices[0].finish_reason not in ["stop", "tool_calls", "function_call"]:
             raise InvalidChatCompletionException(finish_reason)
         
-    def make_messages_compatible(self, messages):
+    def _make_messages_compatible(self, messages: list[dict]) -> list[dict]:
         """Deepseek, Gemini and Moonshot AI doesn't seem to support the new developer messages that replaced system messages in the OpenAI spec"""
         if self.api_provider.name in ["deepseek", "gemini", "moonshot"]:
             for message in messages:
@@ -372,7 +403,7 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
         return messages
     
     @staticmethod
-    def make_json_serializable(messages):
+    def _make_json_serializable(messages: list[Union[dict, ChatCompletionMessage]]) -> list[dict]:
         json_serializable_messages = []
         for message in messages:
             if isinstance(message, ChatCompletionMessage):    # Used for sending back function calls back to the model
@@ -380,13 +411,13 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
             json_serializable_messages.append(message)
         return json_serializable_messages
 
-    def response_contains_malformed_tool_calls(self, response, tools):
+    def _response_contains_malformed_tool_calls(self, response: ChatCompletion, tools: list[Tool]) -> bool:
         tool_calls = response.choices[0].message.tool_calls
         if tool_calls is None:
             return False
         for tool_call in tool_calls:
             try:
-                tool = self.find_tool(tool_call.function.name, tools)
+                tool = self._find_tool(tool_call.function.name, tools)
                 args = json.loads(tool_call.function.arguments)
                 tool.validate_arguments(args)
             except Exception as e:
@@ -394,8 +425,8 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
                 return True
         return False
 
-    async def create_chat_completion(self, model, messages, **kwargs):
-        messages = self.make_messages_compatible(messages)
+    async def create_chat_completion(self, model: str, messages: list[Union[dict, ChatCompletionMessage]], **kwargs) -> RawTurnResult:
+        messages = self._make_messages_compatible(messages)
         logger.info(f"Sending request to model: {model}")
         response = await self.client.chat.completions.create(
             model=model,
@@ -420,23 +451,22 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
             response=response,
             trace=[
                 json.dumps(
-                    {"model": model, "messages": self.make_json_serializable(messages), **kwargs}
+                    {"model": model, "messages": self._make_json_serializable(messages), **kwargs}
                 ),    # TODO: Will fail if kwargs contain non-serializable objects.
                 response.model_dump_json()
             ],
         )
     
-    async def run_tool_loop(
-            self, 
-            model, 
-            messages, 
-            tools, 
-            client=None, 
-            sleep=0, 
-            code_timeout=120,
-            max_retries=0,
+    async def _run_tool_loop(
+            self,
+            tools: list[Tool],
+            repl: Optional[REPL],
+            model: str,
+            messages: list[dict],
+            max_retries: int,
+            sleep: float,
             **kwargs
-            ):
+            ) -> RawTurnResult:
         trace = []
         messages = copy.deepcopy(messages)    # prevent side effects of modifying the messages list in place
         api_tools = [tool.chat_completions_schema for tool in tools]
@@ -460,7 +490,7 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
                     else:
                         logger.info(f"Failed to avoid errors after {max_retries} retries")
                         raise e
-                if self.response_contains_malformed_tool_calls(result.response, tools):
+                if self._response_contains_malformed_tool_calls(result.response, tools):
                     if retry_count > 0:
                         logger.info(f"Malformed tool calls found in response, retrying")
                         retry_count -= 1
@@ -488,7 +518,7 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
                 tool_name = tool_call.function.name
                 logger.info(f"Model called tool named {tool_name}")
                 try:
-                    tool = self.find_tool(tool_name, tools)
+                    tool = self._find_tool(tool_name, tools)
                 except ValueError as e:
                     error_message = str(e)
                     logger.exception(error_message)
@@ -525,8 +555,8 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
                         "content": error_message,
                     })
                     break
-                if isinstance(tool, IPyBox):
-                    result = await tool.run(client, timeout=code_timeout, **args)
+                if isinstance(tool, REPLTool):
+                    result = await tool.run(repl=repl, **args)
                 else:
                     result = await tool.run(**args)
                 messages.append({
@@ -540,111 +570,70 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
             response=response,
             trace=trace
         )
-            
-    async def create_chat_completion_with_tools(
-            self, 
-            model, 
-            messages, 
-            tools=None,
-            container=None,
-            initial_code=[],
-            code_timeout=120,
-            max_retries=0,
-            **kwargs
-            ):
-        self.validate_tools(tools)
-        if self.tools_contains_ipybox(tools):
-            # Use the same ipython kernel for all function calls to allow for stateful execution.
-            async with ExecutionClient(port=container.executor_port) as ipybox_client: 
-                await self.run_initial_code_ipybox(ipybox_client, initial_code)
-                sleep=0
-                if self.api_provider.name == "openai":
-                    # Sometimes openai flags us for violating usage policies. Will a delay help?
-                    sleep=10
-                result = await self.run_tool_loop(
-                    model, 
-                    messages, 
-                    tools, 
-                    client=ipybox_client, 
-                    sleep=sleep, 
-                    code_timeout=code_timeout,
-                    max_retries=max_retries,
-                    **kwargs
-                )
-        else:
-            result = await self.run_tool_loop(
-                model, 
-                messages, 
-                tools,
-                max_retries=max_retries,
-                **kwargs
-            )
-        return result
 
 # This seems to be the cleanest way to set up the reverse relationship since the client class is not defined yet when the nested class is defined.
 AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig.client_class = AsyncChatCompletionsAPIClient
                    
 class AsyncResponsesAPIClient(AbstractAPIClient):
+    """Client for the OpenAI Responses API."""
 
     @dataclass
     class ResponsesAPICallConfig(AbstractAPIClient.CallConfig):
-        stateful: bool = False    # Set to True when using VLLM as the inference engine
+        background_mode_polling_interval: Optional[float] = None
+        stateful: Optional[bool] = None   # Set to True when using tools with VLLM as the inference engine
+
+        def __post_init__(self) -> None:
+            super().__post_init__()
+            if self.tools is not None:
+                if self.stateful is None:
+                    raise ValueError("stateful must be provided if tools are provided")
+            if self.request_kwargs.get("background", False):
+                if self.background_mode_polling_interval is None:
+                    raise ValueError("background_mode_polling_interval must be provided if background mode is enabled")
 
         @property
-        def request_kwargs(self):
+        def request_kwargs(self) -> dict:
             if self.system_prompt is not None:
                 if hasattr(self.raw_request_kwargs, "instructions"):
                     raise ValueError("Config contains both system_prompt and request keyword argument 'instructions'")
                 return {**self.raw_request_kwargs, "instructions": self.system_prompt}
             return self.raw_request_kwargs
 
-    def __init__(self, api_provider, *args, **kwargs):
+    def __init__(self, api_provider: APIProvider, *args, **kwargs):
         # We use Responses API for accessing GPT OSS using VLLM
         if api_provider.name not in ["openai", "vllm"]:
             raise ValueError(f"Responses API is only supported by OpenAI and VLLM. {api_provider.name} is not supported.")
         super().__init__(api_provider, *args, **kwargs)
 
     @classmethod
-    def validate_call_params(cls, messages, config):
+    async def call(cls, config: ResponsesAPICallConfig, messages: list[dict], initial_code: Optional[list[str]] = None) -> TurnResult:
         if messages_contains_system_prompt(messages):
             raise ValueError("We don't allow system messages in input when using Responses API. Use request param 'instructions' instead.")
         if not isinstance(config, cls.ResponsesAPICallConfig):
             raise ValueError(f"Config must be an instance of {cls.ResponsesAPICallConfig}")
-
-    @classmethod
-    async def call_without_tools(cls, messages, config):
-        cls.validate_call_params(messages, config)
         async with cls(api_provider=config.api_provider, **config.client_kwargs) as client:
-            result = await client.create_response(
-                model=config.model,
-                input=messages,
-                **config.request_kwargs
-            )
-            client.validate_response(result.response)
-            return TurnResult(
-                role="assistant",    # In Responses API, it's not safe to assume that response.output[0] is the text response from the model.
-                content=result.response.output_text,
-                trace=result.trace
-            )
-
-    @classmethod
-    async def call_with_tools(cls, messages, container_or_tag, initial_code, config):
-        cls.validate_call_params(messages, config)
-        async with cls(api_provider=config.api_provider, **config.client_kwargs) as client:
-            async with contextlib.AsyncExitStack() as stack:
-                container = await ensure_container(stack, container_or_tag)
-                result = await client.create_response_with_tools(
+            if config.tools is None:
+                result = await client.create_response(
                     model=config.model,
                     input=messages,
+                    background_mode_polling_interval=config.background_mode_polling_interval,
+                    **config.request_kwargs
+                )
+            else:
+                result = await client.ensure_repl_and_run_tool_loop(
                     tools=config.tools,
-                    container=container,
+                    sandbox_cls=config.sandbox_cls,
+                    sandbox_kwargs=config.sandbox_kwargs,
                     initial_code=initial_code,
-                    code_timeout=config.code_timeout,
+                    initial_code_timeout=config.initial_code_timeout,
+                    model=config.model,
+                    input=messages,
+                    background_mode_polling_interval=config.background_mode_polling_interval,
                     max_retries=config.max_retries,
+                    sleep=config.sleep,
                     stateful=config.stateful,
                     **config.request_kwargs
                 )
-            
             client.validate_response(result.response)
             return TurnResult(
                 role="assistant",
@@ -654,12 +643,12 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
 
     @staticmethod
     def get_readable_trace(
-            trace,
-            include_interpreter_output=True,
-            separator="\n\n",
-            include_prompt=False,
-            code_interpreter_tool_name=None
-            ):
+            trace: list[str],
+            include_interpreter_output: bool = True,
+            separator: str = "\n\n",
+            include_prompt: bool = False,
+            code_interpreter_tool_name: Optional[str] = None
+            ) -> str:
         # https://huggingface.co/datasets/JoeYing/ReTool-SFT
         text = ""
         if include_prompt:
@@ -714,8 +703,13 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         return text
 
     @staticmethod
-    def get_token_consumption_from_trace(trace):
-        token_consumption = TokenConsumption()
+    def get_token_consumption_from_trace(trace: list[str]) -> TokenConsumption:
+        token_consumption = TokenConsumption(
+            input=0,
+            output=0,
+            cached_input=0,
+            total=0
+        )
         for item in trace:
             try:
                 response = Response.model_validate_json(item)
@@ -725,7 +719,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         return token_consumption
 
     @staticmethod
-    def get_max_context_from_trace(trace):
+    def get_max_context_from_trace(trace: list[str]) -> int:
         for item in reversed(trace):
             try:
                 response = Response.model_validate_json(item)
@@ -736,7 +730,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         return 0
 
     @staticmethod
-    def token_consumption_from_response(response):
+    def token_consumption_from_response(response: Response) -> TokenConsumption:
         # vllm doesn't return cached input tokens
         try:
             cached_input = response.usage.prompt_tokens_details.cached_tokens
@@ -753,7 +747,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         )
 
     @staticmethod
-    def make_json_serializable(input_items):
+    def _make_json_serializable(input_items: list) -> list:
         json_serializable_input_items = []
         for item in input_items:
             # Reasoning content sent back to model in stateless mode may contain objects of type ResponseOutputItem, which is a subscripted generic.
@@ -763,7 +757,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
             json_serializable_input_items.append(item)
         return json_serializable_input_items
 
-    def tool_loop_response_is_invalid(self, response):
+    def _tool_loop_response_is_invalid(self, response: Response) -> bool:
         function_calls = [el for el in response.output if getattr(el, "type", None) == "function_call"]
         if len(function_calls) == 0:
             try:
@@ -772,11 +766,11 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
                 return True
         return False
 
-    def response_contains_malformed_function_calls(self, response, tools):
+    def _response_contains_malformed_function_calls(self, response: Response, tools: list[Tool]) -> bool:
         function_calls = [el for el in response.output if getattr(el, "type", None) == "function_call"]
         for function_call in function_calls:
             try:
-                tool = self.find_tool(function_call.name, tools)
+                tool = self._find_tool(function_call.name, tools)
                 args = json.loads(function_call.arguments)
                 tool.validate_arguments(args)
             except Exception:
@@ -784,7 +778,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
                 return True
         return False
 
-    def response_contains_malformed_reasoning_content(self, response, model):
+    def _response_contains_malformed_reasoning_content(self, response: Response, model: str) -> bool:
         # In the following cases, we are dealing with an open reasoning model which potentially has this problem
         # GPT-OSS definitely has the problem
         # Fine tuned versions of GPT-OSS models may have the problem too, so we check for vllm provider as well
@@ -801,12 +795,12 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         return False
     
     @staticmethod
-    def validate_response(response):
+    def validate_response(response: Response) -> None:
         status = response.status    
         if status != "completed":
             raise InvalidResponseException(status)
     
-    def fix_reasoning_content(self, output, model):
+    def _fix_reasoning_content(self, output: list, model: str) -> list:
         """Keep only the first reasoning block with non-whitespace content, and only its first content item."""
         if "gpt-oss" in model or self.api_provider.name == "vllm":
             filtered_output = []
@@ -836,16 +830,16 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         else:
             return output
 
-    async def handle_background_response(self, response):
+    async def _handle_background_response(self, response: Response, background_mode_polling_interval: Optional[float]) -> Response:
         while response.status in {"queued", "in_progress"}:
             logger.debug(f"Current status: {response.status}")
 
-            await asyncio.sleep(2)  # Wait 2 seconds before polling again
+            await asyncio.sleep(background_mode_polling_interval)
             response = await self.client.responses.retrieve(response.id)
         logger.info(f"Final status: {response.status} (ID: {response.id})")
         return response
     
-    async def create_response(self, model, input, **kwargs):
+    async def create_response(self, model: str, input: list[dict], background_mode_polling_interval: Optional[float], **kwargs) -> RawTurnResult:
         logger.info(f"Sending request to model: {model}")
         response = await self.client.responses.create(
             model=model,
@@ -855,31 +849,31 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
         
         if kwargs.get("background", False):
             logger.info(f"Background mode enabled, polling for response (ID: {response.id})")
-            response = await self.handle_background_response(response)
+            response = await self._handle_background_response(response, background_mode_polling_interval)
         logger.info(f"Response output text:\n{response.output_text}")
         logger.info(f"Tokens consumed by this call: {self.token_consumption_from_response(response)}")
         return RawTurnResult(
             response=response,
             trace=[
                 json.dumps(
-                    {"model": model, "input": self.make_json_serializable(input), **kwargs}
+                    {"model": model, "input": self._make_json_serializable(input), **kwargs}
                 ),
                 response.model_dump_json()
             ]
         )
     
-    async def run_tool_loop(
-            self, 
-            model, 
-            input, 
-            tools, 
-            client=None, 
-            sleep=0, 
-            code_timeout=120, 
-            max_retries=0, 
-            stateful=True, 
+    async def _run_tool_loop(
+            self,
+            tools: list[Tool],
+            repl: Optional[REPL],
+            model: str,
+            input: list[dict],
+            background_mode_polling_interval: Optional[float],
+            max_retries: int,
+            sleep: float,
+            stateful: bool,
             **kwargs
-            ):
+            ) -> RawTurnResult:
         trace = []
         input = copy.deepcopy(input)    # prevent side effects of modifying the input list in place
         if stateful:
@@ -892,6 +886,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
                     "model": model,
                     "input": input,
                     "tools": api_tools,
+                    "background_mode_polling_interval": background_mode_polling_interval,
                 }
                 if stateful:
                     request_args["previous_response_id"] = previous_response_id
@@ -913,9 +908,9 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
                         logger.info(f"Failed to avoid errors after {max_retries} retries")
                         raise e
                 if (
-                    self.response_contains_malformed_function_calls(result.response, tools) or 
-                    self.tool_loop_response_is_invalid(result.response) or 
-                    self.response_contains_malformed_reasoning_content(result.response, model)
+                    self._response_contains_malformed_function_calls(result.response, tools) or 
+                    self._tool_loop_response_is_invalid(result.response) or 
+                    self._response_contains_malformed_reasoning_content(result.response, model)
                 ):
                     if retry_count > 0:
                         logger.info(f"Errored (malformed function calls or incomplete response), retrying")
@@ -943,7 +938,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
             if stateful:
                 input = []
             else:
-                fixed_output = self.fix_reasoning_content(response.output, model)
+                fixed_output = self._fix_reasoning_content(response.output, model)
                 input.extend(fixed_output)
 
             function_calls = [el for el in response.output if el.type == "function_call"]
@@ -955,7 +950,7 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
                 logger.info(f"Model called function named {function_call.name}")
                 tool_name = function_call.name
                 try:
-                    tool = self.find_tool(tool_name, tools)
+                    tool = self._find_tool(tool_name, tools)
                 except ValueError as e:
                     error_message = str(e)
                     logger.exception(error_message)
@@ -991,8 +986,8 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
                         "output": error_message,
                     })
                     break
-                if isinstance(tool, IPyBox):
-                    result = await tool.run(client, timeout=code_timeout, **args)
+                if isinstance(tool, REPLTool):
+                    result = await tool.run(repl=repl, **args)
                 else:
                     result = await tool.run(**args)
                 input.append({
@@ -1006,49 +1001,6 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
             response=response,
             trace=trace,
         )
-    
-    async def create_response_with_tools(
-            self,
-            model,
-            input,
-            tools,
-            container=None,
-            initial_code=[],
-            code_timeout=120,
-            max_retries=0,
-            stateful=True,
-            **kwargs
-            ):
-        self.validate_tools(tools)
-        if self.tools_contains_ipybox(tools):
-            # Use the same ipython kernel for all function calls to allow for stateful execution.
-            async with ExecutionClient(port=container.executor_port) as ipybox_client: 
-                await self.run_initial_code_ipybox(ipybox_client, initial_code)
-                sleep=0
-                if self.api_provider.name == "openai":
-                    # Sometimes openai flags us for violating usage policies. Will a delay help?
-                    sleep=10
-                result = await self.run_tool_loop(
-                    model, 
-                    input, 
-                    tools, 
-                    client=ipybox_client, 
-                    sleep=sleep, 
-                    code_timeout=code_timeout, 
-                    max_retries=max_retries, 
-                    stateful=stateful, 
-                    **kwargs
-                )
-        else:
-            result = await self.run_tool_loop(
-                model, 
-                input, 
-                tools, 
-                max_retries=max_retries, 
-                stateful=stateful, 
-                **kwargs
-            )
-        return result
 
 # This seems to be the cleanest way to set up the reverse relationship since the client class is not defined yet when the nested class is defined.
 AsyncResponsesAPIClient.ResponsesAPICallConfig.client_class = AsyncResponsesAPIClient
@@ -1056,19 +1008,19 @@ AsyncResponsesAPIClient.ResponsesAPICallConfig.client_class = AsyncResponsesAPIC
 class AsyncMessagesAPIClient(AbstractAPIClient):
     """Client for the Anthropic Messages API."""
 
-    @dataclass
+    @dataclass(kw_only=True)
     class MessagesAPICallConfig(AbstractAPIClient.CallConfig):
-        cache_ttl: Union[str, None] = "5m"    # 5m cache is suitable for interleaved thinking as model usually doesn't think for too long for each interleaved thinking block.
+        cache_ttl: Union[str, None]
 
         @property
-        def request_kwargs(self):
+        def request_kwargs(self) -> dict:
             if self.system_prompt is not None:
                 if hasattr(self.raw_request_kwargs, "system"):
                     raise ValueError("Config contains both system_prompt and request keyword argument 'system'")
                 return {**self.raw_request_kwargs, "system": self.system_prompt}
             return self.raw_request_kwargs
 
-    def __init__(self, api_provider, **kwargs):
+    def __init__(self, api_provider: APIProvider, **kwargs):
         self.api_provider = api_provider
         api_key = os.getenv(api_provider.api_key_env_var) or kwargs.get("api_key")
         if api_key is None:
@@ -1076,51 +1028,33 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
 
     @classmethod
-    def validate_call_params(cls, messages, config):
+    async def call(cls, config: MessagesAPICallConfig, messages: list[dict], initial_code: Optional[list[str]] = None, **kwargs):
         if messages_contains_system_prompt(messages):
             raise ValueError("We don't allow system messages in messages when using Messages API. Use request param 'system' instead.")
         if not isinstance(config, cls.MessagesAPICallConfig):
             raise ValueError(f"Config must be an instance of {cls.MessagesAPICallConfig}")
-
-    @classmethod
-    async def call_without_tools(cls, messages, config):
-        cls.validate_call_params(messages, config)
         async with cls(api_provider=config.api_provider, **config.client_kwargs) as client:
-            result = await client.create_message(
-                model=config.model,
-                messages=messages,
-                **config.request_kwargs
-            )
-            client.validate_response(result.response)
-            
-            text_blocks = client.extract_text_blocks(result.response)
-            return TurnResult(
-                role="assistant",
-                content="\n".join(text_blocks),
-                trace=result.trace
-            )
-
-    @classmethod
-    async def call_with_tools(cls, messages, container_or_tag, initial_code, config):
-        cls.validate_call_params(messages, config)
-        async with cls(api_provider=config.api_provider, **config.client_kwargs) as client:
-            async with contextlib.AsyncExitStack() as stack:
-                container = await ensure_container(stack, container_or_tag)
-                result = await client.create_message_with_tools(
+            if config.tools is None:
+                result = await client.create_message(
                     model=config.model,
                     messages=messages,
+                    **config.request_kwargs
+                )
+            else:
+                result = await client.ensure_repl_and_run_tool_loop(
                     tools=config.tools,
-                    container=container,
+                    sandbox_cls=config.sandbox_cls,
+                    sandbox_kwargs=config.sandbox_kwargs,
                     initial_code=initial_code,
-                    code_timeout=config.code_timeout,
+                    initial_code_timeout=config.initial_code_timeout,
+                    model=config.model,
+                    messages=messages,
                     max_retries=config.max_retries,
+                    sleep=config.sleep,
                     cache_ttl=config.cache_ttl,
                     **config.request_kwargs
                 )
-            
             client.validate_response(result.response)
-            
-            # Extract text content from response
             text_blocks = client.extract_text_blocks(result.response)
             return TurnResult(
                 role="assistant",
@@ -1130,12 +1064,12 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
 
     @staticmethod
     def get_readable_trace(
-            trace,
-            include_interpreter_output=True,
-            separator="\n\n",
-            include_prompt=False,
-            code_interpreter_tool_name=None
-            ):
+            trace: list[str],
+            include_interpreter_output: bool = True,
+            separator: str = "\n\n",
+            include_prompt: bool = False,
+            code_interpreter_tool_name: Optional[str] = None
+            ) -> str:
         # https://huggingface.co/datasets/JoeYing/ReTool-SFT
         text = ""
         if include_prompt:
@@ -1204,8 +1138,13 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         return text
 
     @staticmethod
-    def get_token_consumption_from_trace(trace):
-        token_consumption = TokenConsumption()
+    def get_token_consumption_from_trace(trace: list[str]) -> TokenConsumption:
+        token_consumption = TokenConsumption(
+            input=0,
+            output=0,
+            cached_input=0,
+            total=0
+        )
         for item in trace:
             try:
                 response = BetaMessage.model_validate_json(item)
@@ -1215,7 +1154,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         return token_consumption
 
     @staticmethod
-    def get_max_context_from_trace(trace):
+    def get_max_context_from_trace(trace: list[str]) -> int:
         for item in reversed(trace):
             try:
                 response = BetaMessage.model_validate_json(item)
@@ -1226,7 +1165,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         return 0
 
     @staticmethod
-    def token_consumption_from_response(response):
+    def token_consumption_from_response(response: BetaMessage) -> TokenConsumption:
         usage = response.usage
         input_tokens = usage.input_tokens
         output_tokens = usage.output_tokens
@@ -1249,7 +1188,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         )
 
     @staticmethod
-    def make_json_serializable(messages):
+    def _make_json_serializable(messages: list[dict]) -> list[dict]:
         json_serializable_messages = []
         for message in messages:
             message_copy = copy.deepcopy(message)
@@ -1274,13 +1213,13 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         return json_serializable_messages
 
     @staticmethod
-    def validate_response(response):
+    def validate_response(response: BetaMessage) -> None:
         stop_reason = response.stop_reason
         if stop_reason not in ["end_turn", "stop_sequence", "tool_use"]:
             raise InvalidMessageException(stop_reason)
     
     @staticmethod
-    def _update_cache_breakpoint(messages, cache_ttl):
+    def _update_cache_breakpoint(messages: list[dict], cache_ttl: Union[str, None]) -> None:
         """Move cache_control to the last content block of the last message.
         
         This implements a "rolling cache" strategy where we keep one cache breakpoint
@@ -1298,23 +1237,24 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
                     if isinstance(block, dict) and "cache_control" in block:
                         del block["cache_control"]
         
-        # Add cache_control to the last block of the last message
-        last_msg = messages[-1]
-        content = last_msg.get("content", [])
-        if isinstance(content, str):
-            last_msg["content"] = [{"type": "text", "text": content}]
-            content = last_msg["content"]
-        if isinstance(content, list) and len(content) > 0:
-            last_block = content[-1]
-            if isinstance(last_block, dict):
-                last_block["cache_control"] = {"type": "ephemeral", "ttl": cache_ttl}
+        if cache_ttl is not None:
+            # Add cache_control to the last block of the last message
+            last_msg = messages[-1]
+            content = last_msg.get("content", [])
+            if isinstance(content, str):
+                last_msg["content"] = [{"type": "text", "text": content}]
+                content = last_msg["content"]
+            if isinstance(content, list) and len(content) > 0:
+                last_block = content[-1]
+                if isinstance(last_block, dict):
+                    last_block["cache_control"] = {"type": "ephemeral", "ttl": cache_ttl}
     
     @staticmethod
-    def extract_tool_use_blocks(response):
+    def extract_tool_use_blocks(response: BetaMessage):
         return [block for block in response.content if block.type == "tool_use"]
     
     @staticmethod
-    def extract_thinking_blocks(response):
+    def extract_thinking_blocks(response: BetaMessage) -> list[str]:
         thinking_texts = []
         try:
             for block in response.content:
@@ -1328,7 +1268,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         return thinking_texts
     
     @staticmethod
-    def extract_text_blocks(response):
+    def extract_text_blocks(response: BetaMessage) -> list[str]:
         texts = []
         try:
             for block in response.content:
@@ -1338,7 +1278,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
             logger.exception("Failed to extract text blocks")
         return texts
     
-    def response_contains_malformed_tool_calls(self, response, tools):
+    def _response_contains_malformed_tool_calls(self, response: BetaMessage, tools: list[Tool]) -> bool:
         tool_use_blocks = self.extract_tool_use_blocks(response)
         for block in tool_use_blocks:
             try:
@@ -1351,10 +1291,17 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
     
     async def create_message(
         self,
-        model,
-        messages,
-        **kwargs
-    ):
+        model: str,
+        messages: list[dict],
+        cache_ttl: Union[str, None],
+        **kwargs: dict
+    ) -> RawTurnResult:
+        self._update_cache_breakpoint(messages, cache_ttl)
+        if cache_ttl is not None:
+            logger.info(f"Prompt caching enabled with TTL {cache_ttl}")
+        else:
+            logger.info(f"Prompt caching disabled")
+            
         logger.info(f"Sending request to Anthropic model: {model}")
         
         # Use streaming API to keep connection alive during long-running requests (> 10 min)
@@ -1376,43 +1323,36 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
             response=response,
             trace=[
                 json.dumps(
-                    {"model": model, "messages": self.make_json_serializable(messages), **kwargs}
+                    {"model": model, "messages": self._make_json_serializable(messages), **kwargs}
                 ),    # TODO: Will fail if kwargs contain non-serializable objects.
                 response.model_dump_json()
             ],
         )
     
-    async def run_tool_loop(
+    async def _run_tool_loop(
         self,
-        model,
-        messages,
-        tools,
-        client=None,
-        sleep=0,
-        code_timeout=120,
-        max_retries=0,
-        cache_ttl=None,
-        **kwargs
-    ):
+        tools: list[Tool],
+        repl: Optional[REPL],
+        model: str,
+        messages: list[dict],
+        max_retries: int,
+        sleep: float,
+        cache_ttl: Union[str, None],
+        **kwargs: dict
+    ) -> RawTurnResult:
         trace = []
         messages = copy.deepcopy(messages)
         api_tools = [tool.anthropic_schema for tool in tools]
-
-        if cache_ttl is not None:
-            logger.info(f"Prompt caching enabled with TTL {cache_ttl}")
-        else:
-            logger.info(f"Prompt caching disabled")
         
         while True:
             retry_count = max_retries
             while True:         
-                if cache_ttl is not None:
-                    self._update_cache_breakpoint(messages, cache_ttl)
                 try:
                     result = await self.create_message(
                         model=model, 
                         messages=messages, 
                         tools=api_tools,
+                        cache_ttl=cache_ttl,
                         **kwargs
                     )
                 except AnthropicBadRequestError as e:
@@ -1428,7 +1368,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
 
                 response = result.response
                 # Check for malformed tool calls
-                if self.response_contains_malformed_tool_calls(response, tools):
+                if self._response_contains_malformed_tool_calls(response, tools):
                     if retry_count > 0:
                         logger.info("Malformed tool calls found, retrying")
                         retry_count -= 1
@@ -1465,7 +1405,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
                 logger.info(f"Model called tool: {tool_name}")
                 
                 try:
-                    tool = self.find_tool(tool_name, tools)
+                    tool = self._find_tool(tool_name, tools)
                 except ValueError as e:
                     error_message = str(e)
                     logger.exception(error_message)
@@ -1492,8 +1432,8 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
                 
                 # Execute tool
                 logger.info(f"Executing tool {tool_name} with args: {list(args.keys())}")
-                if isinstance(tool, IPyBox):
-                    result = await tool.run(client, timeout=code_timeout, **args)
+                if isinstance(tool, REPLTool):
+                    result = await tool.run(repl=repl, **args)
                 else:
                     result = await tool.run(**args)
                 
@@ -1516,47 +1456,6 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
             response=response,
             trace=trace,
         )
-    
-    async def create_message_with_tools(
-        self,
-        model,
-        messages,
-        tools,
-        container=None,
-        initial_code=[],
-        code_timeout=120,
-        sleep=0,
-        max_retries=0,
-        cache_ttl=None,
-        **kwargs
-    ):
-        self.validate_tools(tools)
-        
-        if self.tools_contains_ipybox(tools):
-            async with ExecutionClient(port=container.executor_port) as ipybox_client:
-                await self.run_initial_code_ipybox(ipybox_client, initial_code)
-                result = await self.run_tool_loop(
-                    model=model,
-                    messages=messages,
-                    tools=tools,
-                    client=ipybox_client,
-                    sleep=sleep,
-                    code_timeout=code_timeout,
-                    max_retries=max_retries,
-                    cache_ttl=cache_ttl,
-                    **kwargs,
-                )
-        else:
-            result = await self.run_tool_loop(
-                model=model,
-                messages=messages,
-                tools=tools,
-                max_retries=max_retries,
-                cache_ttl=cache_ttl,
-                **kwargs,
-            )
-        
-        return result
 
 # This seems to be the cleanest way to set up the reverse relationship since the client class is not defined yet when the nested class is defined.
 AsyncMessagesAPIClient.MessagesAPICallConfig.client_class = AsyncMessagesAPIClient

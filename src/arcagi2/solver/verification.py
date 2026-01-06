@@ -1,15 +1,9 @@
 from dataclasses import dataclass
 import logging
-import os
 from pathlib import Path
 from typing import Union
 
-# USE_DAYTONA=True: Daytona cloud sandboxes, False (default): ipybox Docker
-if os.getenv("USE_DAYTONA", "False") == "True":
-    from arcagi2.tools.execution_client_daytona import ExecutionError, ExecutionContainer
-else:
-    from ipybox import ExecutionError, ExecutionContainer
-
+from arcagi2.solver.config.base import SolverConfig
 from arcagi2.utils.solving_utils import solution_works_on_training_examples, get_coverage_report
 from arcagi2.utils.utils import save_text, save_json
 
@@ -57,7 +51,7 @@ class VerificationResult:
             logger.exception(f"Error saving additional verification information: {e}")
 
 async def verify_solution(
-        container_or_tag: Union[ExecutionContainer, str],
+        config: SolverConfig,
         puzzle_json,
         solution,
         save_to_dir: Union[Path, None]=None,
@@ -74,21 +68,35 @@ async def verify_solution(
 
     try:
         diff_str, diff_info, score_on_training_examples = await solution_works_on_training_examples(
-            puzzle_json, 
-            solution, 
-            container_or_tag
+            sandbox_cls=config.sandbox_cls,
+            puzzle=puzzle_json, 
+            solution=solution, 
+            max_retries=config.max_retries,
+            base_delay=config.base_delay,
+            delay_multiplier=config.delay_multiplier,
+            max_delay=config.max_delay,
+            max_backoff_retries=config.max_backoff_retries,
+            timeout=config.code_timeout,
+            **config.sandbox_kwargs,
         )
-    except (Exception, ExecutionError) as e:
-        logger.exception(f"Error checking if solution works on training examples: {e}")
+    except:
+        logger.exception(f"Error checking if solution works on training examples")
 
     try:
         train_coverage_str, test_coverage_str, train_coverage, test_coverage = await get_coverage_report(
-            puzzle_json, 
-            solution, 
-            container_or_tag
+            sandbox_cls=config.sandbox_cls,
+            puzzle=puzzle_json, 
+            solution=solution, 
+            max_retries=config.max_retries,
+            base_delay=config.base_delay,
+            delay_multiplier=config.delay_multiplier,
+            max_delay=config.max_delay,
+            max_backoff_retries=config.max_backoff_retries,
+            timeout=config.code_timeout,
+            **config.sandbox_kwargs,
         )
-    except (Exception, ExecutionError) as e:
-        logger.exception(f"Error getting coverage report: {e}")
+    except:
+        logger.exception(f"Error getting coverage report")
 
     result = VerificationResult(
         score_on_training_examples=score_on_training_examples,

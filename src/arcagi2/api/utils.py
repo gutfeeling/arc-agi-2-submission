@@ -1,6 +1,9 @@
 # Common utilities for the chat completions and responses APIs
 
-def replace_developer_message(messages, system_prompt):
+from typing import Optional
+
+
+def replace_developer_message(messages: list[dict], system_prompt: Optional[str]) -> list[dict]:
     new_messages = []
     for message in messages:
         if message["role"] != "developer":
@@ -11,7 +14,7 @@ def replace_developer_message(messages, system_prompt):
         ] + new_messages
     return new_messages
 
-def messages_contains_system_prompt(messages):
+def messages_contains_system_prompt(messages: list[dict]) -> bool:
     for message in messages:
         if message["role"] in ["developer", "system"]:
             return True

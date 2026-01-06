@@ -1,8 +1,55 @@
 # General purpose utilities
 
+from dataclasses import fields
 import json
 from pathlib import Path
 import re
+
+
+class SerializableDataclassMixin:
+    """Mixin that adds to_dict() method for dataclasses with non-serializable fields."""
+    
+    def to_dict(self, include_properties: bool = True) -> dict:
+        result = {}
+        # Serialize dataclass fields
+        for field in fields(self):
+            value = getattr(self, field.name)
+            result[field.name] = self._serialize_value(value)
+        # Serialize properties
+        if include_properties:
+            for name in dir(type(self)):
+                if isinstance(getattr(type(self), name, None), property):
+                    try:
+                        value = getattr(self, name)
+                        result[name] = self._serialize_value(value)
+                    except Exception:
+                        pass  # Skip properties that raise exceptions
+        return result
+    
+    @classmethod
+    def _serialize_value(cls, value):
+        if value is None:
+            return None
+        elif isinstance(value, Path):
+            return str(value)
+        elif isinstance(value, type):
+            return value.__name__
+        elif hasattr(value, "to_dict"):
+            return value.to_dict()
+        elif hasattr(value, "__dataclass_fields__"):
+            # Recursively serialize dataclass fields (don't use asdict as it can't handle Path, Type, etc.)
+            return {
+                field.name: cls._serialize_value(getattr(value, field.name))
+                for field in fields(value)
+            }
+        elif isinstance(value, list):
+            return [cls._serialize_value(item) for item in value]
+        elif isinstance(value, dict):
+            return {k: cls._serialize_value(v) for k, v in value.items()}
+        elif isinstance(value, (str, int, float, bool)):
+            return value
+        else:
+            return repr(value)
 
 
 def read_file(file_path: Path, encoding: str = "utf-8") -> str:

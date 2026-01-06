@@ -9,6 +9,7 @@ PLAIN_COT_SOLVER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
     model="gpt-5.2",
     api_provider=OPENAI_API_PROVIDER,
     prompt_path = PROMPTS_FOLDER / "plain_cot_solver.txt",
+    system_prompt_path=None,
     client_kwargs = {
         "timeout": Timeout(timeout=60.0, connect=5.0),    # In background mode, retrieve should return fast
     },
@@ -20,7 +21,7 @@ PLAIN_COT_SOLVER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
         # Background mode requires store=True
         "store": True   
     },
-    max_retries=2
+    background_mode_polling_interval=2,
 )
 
 GPT_5_2_XHIGH_BASELINE_CONFIG = BaselineConfig(

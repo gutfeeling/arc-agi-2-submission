@@ -2,72 +2,50 @@ from httpx import Timeout
 
 from arcagi2.api.clients import AsyncResponsesAPIClient
 from arcagi2.api.providers import OPENAI_API_PROVIDER
-from arcagi2.solver.config.base import SystemConfig, PROMPTS_FOLDER
-from arcagi2.tools.code_interpreter_ipybox import IPyBoxWithProtection
+from arcagi2.solver.config.base import InterleavedThinkingConfig, PROMPTS_FOLDER, IPYBOX_SANDBOX_CLS, IPYBOX_SANDBOX_KWARGS
+from arcagi2.tools.repl_tool import REPLToolWithProtection
 
 
-INTERLEAVED_THINKING_SOLVER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
+_COMMON_KWARGS = dict(
     model="gpt-5.2",
     api_provider=OPENAI_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "interleaved_thinking_solver.txt",
-    client_kwargs = {
-        "timeout": Timeout(timeout=60.0, connect=5.0),    # In background mode, retrieve should return fast
-    },
-    system_prompt_path = PROMPTS_FOLDER / "system_prompt.txt",
-    tools=[IPyBoxWithProtection(protected_variables=["puzzle"], name="python")],
-    raw_request_kwargs = {
+    system_prompt_path=PROMPTS_FOLDER / "system_prompt.txt",
+    client_kwargs={"timeout": Timeout(timeout=60.0, connect=5.0)},  # In background mode, retrieve should return fast
+    raw_request_kwargs={
         "reasoning": {
-            "effort": "xhigh",
+            "effort": "xhigh"
         },
         "background": True,
-        # Background mode requires store=True
-        "store": True   
+        "store": True  # Background mode requires store=True
     },
-    max_retries=2
+    tools=[REPLToolWithProtection(name="python", timeout=120, protected_variables=["puzzle"])],
+    max_retries=2,
+    sleep=10,
+    sandbox_cls=IPYBOX_SANDBOX_CLS,
+    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
+    initial_code_timeout=120,
+    background_mode_polling_interval=2,
+    stateful=True
+)
+
+INTERLEAVED_THINKING_SOLVER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
+    **_COMMON_KWARGS,
+    prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
 )
 
 SOFT_VERIFIER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
-    model="gpt-5.2",
-    api_provider=OPENAI_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "soft_verifier.txt",
-    client_kwargs = {
-        "timeout": Timeout(timeout=60.0, connect=5.0),    # In background mode, retrieve should return fast
-    },
-    system_prompt_path = PROMPTS_FOLDER / "system_prompt.txt",
-    tools=[IPyBoxWithProtection(protected_variables=["train"], name="python")],
-    raw_request_kwargs = {
-        "reasoning": {
-            "effort": "xhigh",
-        },
-        "background": True,
-        # Background mode requires store=True
-        "store": True   
-    },
-    max_retries=2
+    **_COMMON_KWARGS,
+    prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
 )
 
 GENERALIZER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
-    model="gpt-5.2",
-    api_provider=OPENAI_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "generalizer.txt",
-    client_kwargs = {
-        "timeout": Timeout(timeout=60.0, connect=5.0),    # In background mode, retrieve should return fast
-    },
-    system_prompt_path = PROMPTS_FOLDER / "system_prompt.txt",
-    tools=[IPyBoxWithProtection(protected_variables=["puzzle"], name="python")],
-    raw_request_kwargs = {
-        "reasoning": {
-            "effort": "xhigh",
-        },
-        "background": True,
-        # Background mode requires store=True
-        "store": True   
-    },
-    max_retries=2
+    **_COMMON_KWARGS,
+    prompt_path=PROMPTS_FOLDER / "generalizer.txt"
 )
 
-GPT_5_2_XHIGH_SYSTEM_CONFIG = SystemConfig(
-    code_sandbox_container_tag="ipybox:solver",
+GPT_5_2_XHIGH_SYSTEM_CONFIG = InterleavedThinkingConfig(
+    sandbox_cls=IPYBOX_SANDBOX_CLS,
+    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
     interleaved_thinking_solver=INTERLEAVED_THINKING_SOLVER,
     soft_verifier=SOFT_VERIFIER,
     generalizer=GENERALIZER,

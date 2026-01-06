@@ -33,10 +33,7 @@ logger = logging.getLogger(__name__)
 async def main(
     evaluation_data_file,
     config_name,
-    output_folder,
-    num_samples,
-    max_retries,
-    plain_cot,
+    output_folder,  
     vllm_base_url,
     max_parallel_requests,
     env_file,
@@ -125,9 +122,6 @@ async def main(
                         config=config,
                         puzzle_json=item["puzzle"],
                         output_folder=item_folder,
-                        num_samples=num_samples,
-                        max_retries=max_retries,
-                        use_tools=not plain_cot,
                     ),
                     timeout=timeout_minutes * 60
                 )
@@ -206,26 +200,6 @@ def parse_arguments():
         type=str,
         help="Folder to save the output"
     )
-
-    parser.add_argument(
-        "-n", "--num_samples",
-        type=int,
-        default=5,
-        help="Number of samples to generate"
-    )
-
-    parser.add_argument(
-        "--max_retries",
-        type=int,
-        default=2,
-        help="Maximum number of retries for avoidable model failures"
-    )
-
-    parser.add_argument(
-        "--plain_cot",
-        action="store_true",
-        help="Use plain COT baseline"
-    )
     
     parser.add_argument(
         "-b", "--vllm_base_url",
@@ -278,15 +252,16 @@ def main_cli():
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
+    
+    # Silence noisy HTTP client logs (polling creates a lot of noise)
+    # We save all logs to files, so we would need a lot of space. This is especially bad in Kaggle I guess.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     asyncio.run(
         main(
             evaluation_data_file=args.evaluation_data_file,
             config_name=args.config_name,
             output_folder=args.output_folder,
-            num_samples=args.num_samples,
-            max_retries=args.max_retries,
-            plain_cot=args.plain_cot,
             vllm_base_url=args.vllm_base_url,
             max_parallel_requests=args.max_parallel_requests,
             env_file=args.env_file,

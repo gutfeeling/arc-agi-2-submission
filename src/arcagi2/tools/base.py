@@ -1,18 +1,21 @@
+from abc import ABC, abstractmethod
+from typing import ClassVar, Union
+
 from jsonschema import validate
 from jsonschema.exceptions import ValidationError
 
-class Tool:
-    NAME = NotImplemented  # Use for setting default values for a tool, can be overridden in __init__
-    DESCRIPTION = NotImplemented
-    PARAMETERS = NotImplemented
+class Tool(ABC):
+    NAME: ClassVar[str]  # Use for setting default values for a tool, can be overridden in __init__
+    DESCRIPTION: ClassVar[str]
+    PARAMETERS: ClassVar[dict]
 
     def __init__(
         self,
-        name=None,
-        description=None,
-        parameters=None,
-        strict=True,
-        include_strict=True
+        name: Union[str, None] = None,
+        description: Union[str, None] = None,
+        parameters: Union[dict, None] = None,
+        strict: bool = True,
+        include_strict: bool = True
     ):
         self.name = self.NAME
         self.description = self.DESCRIPTION
@@ -26,14 +29,23 @@ class Tool:
         self.strict = strict
         self.include_strict = include_strict
 
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"name={self.name!r}, "
+            f"description={self.description!r}, "
+            f"strict={self.strict!r}, "
+            f"include_strict={self.include_strict!r})"
+        )
+
     @property
-    def chat_completions_schema(self):
+    def chat_completions_schema(self) -> dict:
         function_dict = {
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
         }
-        if self.include_strict:    # TRL format or VLLM doesn't support strict, so our finetuned models don't need this key
+        if self.include_strict:    # VLLM doesn't support strict
             function_dict["strict"] = self.strict
         return {
             "type": "function",
@@ -41,7 +53,7 @@ class Tool:
         }
 
     @property
-    def responses_api_schema(self):
+    def responses_api_schema(self) -> dict:
         return {
             "type": "function",
             "name": self.name,
@@ -51,17 +63,18 @@ class Tool:
         }
 
     @property
-    def anthropic_schema(self):
+    def anthropic_schema(self) -> dict:
         return {
             "name": self.name,
             "description": self.description,
             "input_schema": self.parameters,
         }
 
-    async def run(self, *args, **kwargs):
-        raise NotImplementedError("Subclasses must implement this method")
+    @abstractmethod
+    async def run(self, *args, **kwargs) -> str:
+        pass
 
-    def validate_arguments(self, args: dict):
+    def validate_arguments(self, args: dict) -> None:
         try:
             validate(instance=args, schema=self.parameters)
         except ValidationError as e:
