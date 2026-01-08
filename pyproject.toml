@@ -14,6 +14,7 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic==0.75.0",
     "daytona==0.128.1",
+    "httpx==0.28.1",
     "ipybox==0.6.2",
     "jsonschema==4.25.1",
     "openai==2.14.0",
@@ -24,7 +25,7 @@ dependencies = [
 
 [project.scripts]
 arcagi2-solve = "arcagi2.solver.solver:main_cli"
-arcagi2-submit = "arcagi2.evaluation.evaluate:main_cli"
+arcagi2-evaluate = "arcagi2.evaluation.evaluate:main_cli"
 arcagi2-score = "arcagi2.evaluation.score:main_cli"
 
 [tool.setuptools.packages.find]
