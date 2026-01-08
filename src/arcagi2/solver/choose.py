@@ -172,10 +172,13 @@ def choose_best_solution(output_folder: Path) -> Union[Path, None]:
     
     return chosen["path"]
 
-def choose_best_output_grids(puzzle_json: dict, output_folder: Path) -> tuple[dict, dict]:
+def choose_best_output_grids(puzzle_json: dict, output_folder: Path) -> list[dict]:
     """
     Choose the best output grids from the output folder based on majority voting.
     Used for the plain COT baseline.
+    
+    Returns a list in Kaggle submission format:
+    [{"attempt_1": grid, "attempt_2": grid}, ...] where each element corresponds to a test case.
     """
     
     output_folder = Path(output_folder)
@@ -203,20 +206,17 @@ def choose_best_output_grids(puzzle_json: dict, output_folder: Path) -> tuple[di
 
 
     # Sort by majority vote, grids that appear more often are better
-    
     sorted_solutions = {
         test_index: sorted(solutions[test_index], key=lambda x: x[1], reverse=True)
         for test_index in solutions.keys()
     }
     
-    attempt_1 = {
-        test_index: sorted_solutions[test_index][0][0] if len(sorted_solutions[test_index]) > 0 else None
-        for test_index in sorted_solutions.keys()
-    }
-
-    attempt_2 = {
-        test_index: sorted_solutions[test_index][1][0] if len(sorted_solutions[test_index]) > 1 else None
-        for test_index in sorted_solutions.keys()
-    }
-
-    return attempt_1, attempt_2
+    # Build submission list in Kaggle format
+    submission = [
+        {
+            "attempt_1": sorted_solutions[test_index][0][0] if len(sorted_solutions[test_index]) > 0 else None,
+            "attempt_2": sorted_solutions[test_index][1][0] if len(sorted_solutions[test_index]) > 1 else None,
+        }
+        for test_index in range(len(puzzle_json["test"]))
+    ]
+    return submission

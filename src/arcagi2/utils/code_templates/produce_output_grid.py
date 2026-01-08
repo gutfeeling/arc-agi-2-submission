@@ -21,4 +21,14 @@ def clean_grid(grid):
         output.append(new_row)
     return output
 
-out = clean_grid(solution(puzzle['test'][test_idx]['input']))
+out = []
+for idx, ex in enumerate(puzzle["test"]):
+    grid = ex["input"]
+    try:
+        predicted = solution(copy.deepcopy(grid))
+    except Exception as e:
+        print(f"Test example {idx}: ERROR\n{e}\n")
+        out.append(None)
+        continue
+    else:
+        out.append(clean_grid(predicted))

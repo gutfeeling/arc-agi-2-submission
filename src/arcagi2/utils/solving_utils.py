@@ -11,54 +11,6 @@ from arcagi2.utils.utils import read_file
 
 logger = logging.getLogger(__name__)
 
-async def score_single_solution(
-        sandbox_cls: Sandbox,
-        puzzle: dict, 
-        solution: str,
-        max_retries: int,
-        base_delay: int,
-        delay_multiplier: float,
-        max_delay: int,
-        max_backoff_retries: int,
-        timeout: float,
-        **kwargs
-        ) -> list[int]:
-    check_solution_code_template = read_file(
-        CODE_TEMPLATES_FOLDER / "check_solution_each_pair.py"
-    )
-    cells = [
-        # sometimes solution relies on the presence of the variable `puzzles`. We remove the solutions to not leak answers.
-        f"puzzle={repr(get_copy_without_solutions(puzzle))}",
-        solution,
-        f"tests={repr(puzzle['test'])}",
-        check_solution_code_template,
-    ]
-    attempt = 0
-    while True:
-        result = await sandbox_cls.run_cells(
-            cells, 
-            timeout=timeout,
-            base_delay=base_delay,
-            delay_multiplier=delay_multiplier,
-            max_delay=max_delay,
-            max_backoff_retries=max_backoff_retries,
-            **kwargs
-        )
-        output = result[-1].text
-        if output is None:
-            if attempt < max_retries:
-                logger.warning(f"Hit the IPyBox bug: last cell's output is unexpectedly None. Retrying...")
-                attempt += 1
-                continue
-            else:
-                raise RuntimeError("Hit the IPyBox bug: last cell's output is unexpectedly None")
-        else:
-            break
-    
-    last_line = output.splitlines()[-1]
-    score = [int(score) for score in last_line.split()]
-    return score
-
 async def solution_works_on_training_examples(
         sandbox_cls: Sandbox,
         puzzle: dict, 
@@ -168,22 +120,9 @@ async def get_coverage_report(
     test_reports = json.loads(ast.literal_eval(test_reports_output))
     return train_reports_str, test_reports_str, train_reports, test_reports
 
-def score_non_code_solution(
-        puzzle: dict, 
-        solution: str, 
-        ) -> list[int]:
-    score = [0 for _ in range(len(puzzle["test"]))]
-    for idx, pair in enumerate(puzzle["test"]):
-        try:
-            score[idx] = 1 if pair["output"] == solution[str(idx)] else 0
-        except Exception as e:
-            logger.exception(f"Error scoring test index {idx}")
-    return score
-
 async def get_output_grid_from_solution(
         sandbox_cls: Sandbox,
         puzzle: dict, 
-        test_idx: int, 
         solution: str,
         max_retries: int,
         base_delay: int,
@@ -196,11 +135,9 @@ async def get_output_grid_from_solution(
     produce_output_grid_code_template = read_file(
         CODE_TEMPLATES_FOLDER / "produce_output_grid.py"
     )
-    assert test_idx >= 0 and test_idx < len(puzzle["test"]), "Test index out of range"
     cells = [
         f"puzzle={repr(get_copy_without_solutions(puzzle))}",
         solution,
-        f"test_idx={test_idx}",
         produce_output_grid_code_template,
         "import json\n\njson.dumps(out, indent=4)",
     ]
