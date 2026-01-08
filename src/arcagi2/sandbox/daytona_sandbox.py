@@ -153,17 +153,20 @@ class DaytonaSandbox(Sandbox):
                 result = await repl.execute("print('hello')")
     """
     
-    def __init__(self, image: Image, resources: Resources, creation_timeout: int, api_key: Optional[str] = None, target: Optional[str] = None):
+    def __init__(self, image: Image, resources: Resources, creation_timeout: int, auto_stop_interval: int, api_key: Optional[str] = None, target: Optional[str] = None):
         """
         Args:
             image: Daytona Image object (declarative image specification).
+            resources: Resources for the sandbox.
             creation_timeout: Timeout in seconds for sandbox creation.
+            auto_stop_interval: Interval in minutes after which the sandbox will be stopped.
             api_key: Daytona API key (defaults to DAYTONA_API_KEY env var).
             target: Daytona target (defaults to DAYTONA_TARGET env var).
         """
         self.image = image
         self.resources = resources
         self.creation_timeout = creation_timeout
+        self.auto_stop_interval = auto_stop_interval
         self.api_key = api_key or os.environ.get("DAYTONA_API_KEY")
         if self.api_key is None:
             raise ValueError("Daytona API key is required. Set DAYTONA_API_KEY environment variable.")
@@ -176,6 +179,20 @@ class DaytonaSandbox(Sandbox):
         if self.target is not None:
             config.target = self.target
         self._daytona = AsyncDaytona(config)
+        
+        # Workaround for Daytona SDK bug: _api_clients is a class variable shared across
+        # all AsyncDaytona instances. When one instance closes, it closes all clients.
+        # Fix: give this instance its own isolated client list, and remove from class list
+        # to prevent memory leak (class list never gets cleaned up).
+        # Already fixed in Daytona main branch, but they haven't released yet.
+        # See: https://github.com/daytonaio/daytona/commit/13542e5677668ed03279ac27596db3e01e22be7d
+        # TODO: Remove after upgrading to daytona SDK version with the fix
+        self._daytona._api_clients = [self._daytona._api_client]
+        try:
+            AsyncDaytona._api_clients.remove(self._daytona._api_client)
+        except ValueError:
+            pass  # Already removed or not present
+        
         self._sandbox = None
     
     async def __aenter__(self) -> Self:
@@ -186,7 +203,9 @@ class DaytonaSandbox(Sandbox):
             self._sandbox = await self._daytona.create(
                 CreateSandboxFromImageParams(
                     image=self.image,
-                    resources=self.resources
+                    resources=self.resources,
+                    auto_stop_interval=self.auto_stop_interval,
+                    auto_delete_interval=0    # Sandbox will be deleted immediately after stopping
                 ),
                 timeout=self.creation_timeout
             )
