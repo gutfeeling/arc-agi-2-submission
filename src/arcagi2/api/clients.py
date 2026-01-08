@@ -114,13 +114,20 @@ class AbstractAPIClient(ABC):
 
         @property
         def prompt(self) -> str:
-            return read_file(self.prompt_path)
+            if hasattr(self, "_prompt"):
+                return self._prompt
+            self._prompt = read_file(self.prompt_path)
+            return self._prompt
 
         @property
         def system_prompt(self) -> Union[str, None]:
+            if hasattr(self, "_system_prompt"):
+                return self._system_prompt
             if isinstance(self.system_prompt_path, Path):
-                return read_file(self.system_prompt_path)
-            return self.system_prompt_path
+                self._system_prompt = read_file(self.system_prompt_path)
+            else:
+                self._system_prompt = None
+            return self._system_prompt
 
         @property
         def request_kwargs(self) -> dict:
