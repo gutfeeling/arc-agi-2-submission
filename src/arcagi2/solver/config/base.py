@@ -38,7 +38,8 @@ DAYTONA_SANDBOX_KWARGS = {
         memory=2,
         disk=3
     ),
-    "creation_timeout": 600
+    "creation_timeout": 600,
+    "auto_stop_interval": 12 * 60    # 12 hours
 }
 
 @dataclass
