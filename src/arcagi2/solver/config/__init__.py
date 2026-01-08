@@ -1,11 +1,9 @@
 from arcagi2.solver.config.claude_opus_4_5_64k import CLAUDE_OPUS_4_5_64K_SYSTEM_CONFIG
 from arcagi2.solver.config.claude_opus_4_5_64k_baseline import CLAUDE_OPUS_4_5_64K_BASELINE_CONFIG
-from arcagi2.solver.config.gpt_5_2_xhigh import GPT_5_2_XHIGH_SYSTEM_CONFIG 
+from arcagi2.solver.config.gpt_5_2_xhigh import GPT_5_2_XHIGH_SYSTEM_CONFIG, GPT_5_2_XHIGH_DAYTONA_SYSTEM_CONFIG
 from arcagi2.solver.config.gpt_5_2_xhigh_baseline import GPT_5_2_XHIGH_BASELINE_CONFIG
-from arcagi2.solver.config.gpt_5_2_xhigh_daytona import GPT_5_2_XHIGH_DAYTONA_SYSTEM_CONFIG
-from arcagi2.solver.config.gpt_oss_120b_high import GPT_OSS_120B_HIGH_SYSTEM_CONFIG
+from arcagi2.solver.config.gpt_oss_120b_high import GPT_OSS_120B_HIGH_SYSTEM_CONFIG, GPT_OSS_120B_HIGH_DAYTONA_SYSTEM_CONFIG
 from arcagi2.solver.config.gpt_oss_120b_high_baseline import GPT_OSS_120B_HIGH_BASELINE_CONFIG
-from arcagi2.solver.config.gpt_oss_120b_high_daytona import GPT_OSS_120B_HIGH_DAYTONA_SYSTEM_CONFIG
 
 SOLVER_CONFIGS = {
     "claude_opus_4_5_64k": CLAUDE_OPUS_4_5_64K_SYSTEM_CONFIG,
