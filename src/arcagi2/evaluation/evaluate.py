@@ -5,10 +5,10 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 import uuid
 
 from dotenv import load_dotenv
-
 
 from arcagi2.api.clients import AbstractAPIClient
 from arcagi2.evaluation.dashboard import StatusDashboard
@@ -22,15 +22,15 @@ logger = logging.getLogger(__name__)
 
 
 async def evaluate(
-    challenge_file,
-    config_name,
-    output_folder,  
-    vllm_base_url,
-    parallel,
-    submission_folder,
-    puzzle_timeout_minutes,
-    resume,
-    env_file=None,    # allowing None because it's cumbersome to use dotenv in Kaggle. It's easier to just set os.environ directly from data in User Secrets.
+    challenge_file: str,
+    config_name: str,
+    output_folder: str,  
+    vllm_base_url: str,
+    parallel: int,
+    submission_folder: str,
+    puzzle_timeout_minutes: int,
+    resume: bool,
+    env_file: Optional[str] = None,    # allowing None because it's cumbersome to use dotenv in Kaggle. It's easier to just set os.environ directly from data in User Secrets.
 ) -> None:
     if env_file is not None:
         logger.info(f"Loading environment variables from {env_file}")
