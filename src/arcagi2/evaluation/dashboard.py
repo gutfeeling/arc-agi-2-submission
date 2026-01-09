@@ -186,24 +186,31 @@ class StatusDashboard:
         lines.append("═" * 80)
         return "\n".join(lines)
 
+    def update(self):
+        """Scan status and print display if there are changes."""
+        try:
+            current_state = self._scan_status()
+            changes = self._get_changes(current_state)
+            
+            if changes:
+                print(self._build_display(current_state, changes))
+                print()
+                self._update_prev_state(current_state)
+        except Exception as e:
+            print(f"[Dashboard error: {e}]")
+
     async def run(self):
         """Run the dashboard polling loop."""
         self._running = True
         
         while self._running:
-            try:
-                current_state = self._scan_status()
-                changes = self._get_changes(current_state)
-                
-                if changes:
-                    print(self._build_display(current_state, changes))
-                    print()
-                    self._update_prev_state(current_state)
-            except Exception as e:
-                print(f"[Dashboard error: {e}]")
-            
+            self.update()
             await asyncio.sleep(self.poll_interval)
 
     def stop(self):
         """Stop the dashboard."""
         self._running = False
+
+    def print_error(self, error: Exception):
+        """Print a single line indicating an error occurred."""
+        print(f"Error: {error}.\nAll tasks have been cancelled. Evaluation failed.")

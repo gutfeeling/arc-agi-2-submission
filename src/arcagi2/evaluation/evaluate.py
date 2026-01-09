@@ -205,6 +205,10 @@ async def evaluate(
             f"Processing complete! {total_puzzles} puzzles processed"
         )
         logger.info("Evaluation completed successfully")
+        dashboard.update()
+    except Exception as e:
+        dashboard.print_error(e)
+        raise
     finally:
         dashboard.stop()
         dashboard_task.cancel()
