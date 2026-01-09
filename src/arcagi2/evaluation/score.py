@@ -77,11 +77,16 @@ def create_score_summary(solutions: dict[str, list[list[list[int]]]], scoring_re
     score = score_df["score"].mean()
     logger.info(f"Score: {score}")
 
-async def main(
+async def score_submission(
     solutions_file: str,
     output_folder: str,
     submission_folder_relative: Optional[str],
 ):
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+
     output_folder = Path(output_folder)
     if not output_folder.is_absolute():
         output_folder = Path.cwd() / output_folder
@@ -163,14 +168,9 @@ def parse_arguments():
 
 def main_cli():
     args = parse_arguments()
-    
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
-    )
 
     asyncio.run(
-        main(
+        score_submission(
             solutions_file=args.solutions_file,
             output_folder=args.output_folder,
             submission_folder_relative=args.submission_folder_relative,
