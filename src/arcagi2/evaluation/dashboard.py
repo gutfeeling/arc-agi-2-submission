@@ -38,8 +38,7 @@ class StatusDashboard:
         self.total_puzzles = total_puzzles
         self.eval_start_time = eval_start_time
         self.poll_interval = poll_interval
-        self.max_rows = max_rows    
-        self._running = False
+        self.max_rows = max_rows
         
         # Track previous state to detect changes
         # Key: submission_id, Value: (status, solver_status)
@@ -200,16 +199,11 @@ class StatusDashboard:
             print(f"[Dashboard error: {e}]")
 
     async def run(self):
-        """Run the dashboard polling loop."""
-        self._running = True
-        
-        while self._running:
+        """Run the dashboard polling loop. Cancel the task to stop."""
+        print(f"Polling for status changes every {self.poll_interval} seconds...")
+        while True:
             self.update()
             await asyncio.sleep(self.poll_interval)
-
-    def stop(self):
-        """Stop the dashboard."""
-        self._running = False
 
     def print_error(self, error: Exception):
         """Print a single line indicating an error occurred."""

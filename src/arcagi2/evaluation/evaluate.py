@@ -223,7 +223,6 @@ async def evaluate(
         dashboard.print_error(e)
         raise
     finally:
-        dashboard.stop()
         dashboard_task.cancel()
         await asyncio.gather(dashboard_task, return_exceptions=True)
         
