@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
@@ -43,16 +44,16 @@ def compute_score(score_for_attempts: list[list[int]]) -> float:
         return 0
     return sum(any(scores) for scores in score_for_attempts) / len(score_for_attempts)
 
-def create_score_summary(challenge_data, scoring_results):
+def create_score_summary(challenge_data: dict, scoring_results: list[dict]) -> None:
     score_df_data = [
         {
-            "puzzle_id": puzzle_id,
-            "submission_id": submission_id,
-            "score_for_attempts": score_for_attempts,
-            "duration_minutes": duration_seconds / 60,
-            "sample_index": sample_index
-        } for puzzle_id, submission_id, score_for_attempts, duration_seconds, sample_index in scoring_results 
-        if puzzle_id in challenge_data
+            "puzzle_id": item["puzzle_id"],
+            "submission_id": item["submission_id"],
+            "score_for_attempts": item["score_for_attempts"],
+            "duration_minutes": item["duration_seconds"] / 60,
+            "sample_index": item["sample_index"]
+        } for item in scoring_results 
+        if item["puzzle_id"] in challenge_data
     ]
     score_df = pd.DataFrame(score_df_data)
     # Add missing evaluation items
@@ -65,7 +66,7 @@ def create_score_summary(challenge_data, scoring_results):
             "puzzle_id": missing_ids,
             "submission_id": [None] * len(missing_ids),
             "score_for_attempts": [[]] * len(missing_ids),
-            "duration_seconds": [0] * len(missing_ids),
+            "duration_minutes": [0] * len(missing_ids),
             "sample_index": [-1] * len(missing_ids)
         })
         score_df = pd.concat([score_df, missing_df], ignore_index=True)
@@ -77,9 +78,9 @@ def create_score_summary(challenge_data, scoring_results):
     logger.info(f"Score: {score}")
 
 async def main(
-    challenge_file_with_solutions,
-    output_folder,
-    submission_folder_relative,
+    challenge_file_with_solutions: str,
+    output_folder: str,
+    submission_folder_relative: Optional[str],
 ):
     output_folder = Path(output_folder)
     if not output_folder.is_absolute():
@@ -96,23 +97,24 @@ async def main(
         if not subfolder.is_dir():
             continue
 
-        submission_folder = subfolder / submission_folder_relative
-        puzzle_submission_file = submission_folder / "submission.json"
+        puzzle_submission_file = subfolder / "submission.json"
         if not puzzle_submission_file.exists():
             continue
         puzzle_submission = json.loads(read_file(puzzle_submission_file))
         assert len(puzzle_submission) == 1, "Only one puzzle submission is supported"
         puzzle_id = list(puzzle_submission.keys())[0]
         if puzzle_id not in challenge_data:
+            logger.warning(f"Puzzle {puzzle_id} not found in challenge data")
             continue
         score_for_attempts = score_puzzle_submission(challenge_data[puzzle_id], puzzle_submission[puzzle_id])
 
-        submission_metadata_file = submission_folder / "metadata.json"
-        if submission_metadata_file.exists():
-            submission_metadata = json.loads(read_file(submission_metadata_file))
-            sample_index = submission_metadata["sample_index"]
-        else:
-            sample_index = -1    # Special value for no sample index
+        if submission_folder_relative is not None:
+            submission_metadata_file = subfolder / submission_folder_relative / "metadata.json"
+            if submission_metadata_file.exists():
+                submission_metadata = json.loads(read_file(submission_metadata_file))
+                sample_index = submission_metadata["sample_index"]
+            else:
+                sample_index = -1    # Special value for no sample index
 
         metadata_file = subfolder / "metadata.json"
         duration_seconds = 0
@@ -154,7 +156,7 @@ def parse_arguments():
         "-r",
         "--submission_folder_relative",
         type=str,
-        help="Relative path of the folder (with respect to the solver's output folder root)containing submission.json e.g. 'submission' or 'submission/core'",
+        help="Relative path of the folder (with respect to the solver's output folder root) containing sample index information. 'submission/extended' or 'submission/core'. Not required for plain COT solvers.",
     )
     args = parser.parse_args()
 
