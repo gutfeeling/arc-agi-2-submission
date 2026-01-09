@@ -14,14 +14,14 @@ from arcagi2.utils.utils import read_file
 logger = logging.getLogger(__name__)
 
 def score_puzzle_submission(
-        puzzle: dict, 
+        solutions: list[list[list[int]]], 
         submission: list[dict], 
         ) -> list[list[int]]:
     """
     Score a puzzle submission against the expected outputs.
     
     Args:
-        puzzle: The puzzle dict containing "test" key with expected outputs.
+        solutions: List of correct output grids, one per test.
         submission: List of dicts, one per test, each with "attempt_1" and "attempt_2" keys.
                    Format: [{"attempt_1": grid_or_none, "attempt_2": grid_or_none}, ...]
     
@@ -31,7 +31,7 @@ def score_puzzle_submission(
     """
     scores = []
     for test_idx, attempts in enumerate(submission):
-        expected_output = puzzle["test"][test_idx]["output"]
+        expected_output = solutions[test_idx]
         attempt_scores = [
             1 if attempts.get("attempt_1") == expected_output else 0,
             1 if attempts.get("attempt_2") == expected_output else 0,
@@ -44,7 +44,7 @@ def compute_score(score_for_attempts: list[list[int]]) -> float:
         return 0
     return sum(any(scores) for scores in score_for_attempts) / len(score_for_attempts)
 
-def create_score_summary(challenge_data: dict, scoring_results: list[dict]) -> None:
+def create_score_summary(solutions: dict[str, list[list[list[int]]]], scoring_results: list[dict]) -> None:
     score_df_data = [
         {
             "puzzle_id": item["puzzle_id"],
@@ -53,21 +53,21 @@ def create_score_summary(challenge_data: dict, scoring_results: list[dict]) -> N
             "duration_minutes": item["duration_seconds"] / 60,
             "sample_index": item["sample_index"]
         } for item in scoring_results 
-        if item["puzzle_id"] in challenge_data
+        if item["puzzle_id"] in solutions
     ]
     score_df = pd.DataFrame(score_df_data)
     # Add missing evaluation items
     existing_ids = set()
     if len(score_df) > 0:
         existing_ids = set(score_df["puzzle_id"].values)
-    missing_ids = [pid for pid in challenge_data.keys() if pid not in existing_ids]
+    missing_ids = [pid for pid in solutions.keys() if pid not in existing_ids]
     if missing_ids:
         missing_df = pd.DataFrame({
             "puzzle_id": missing_ids,
             "submission_id": [None] * len(missing_ids),
             "score_for_attempts": [[]] * len(missing_ids),
             "duration_minutes": [0] * len(missing_ids),
-            "sample_index": [-1] * len(missing_ids)
+            "sample_index": [None] * len(missing_ids)
         })
         score_df = pd.concat([score_df, missing_df], ignore_index=True)
     score_df["score"] = score_df["score_for_attempts"].apply(compute_score)
@@ -78,7 +78,7 @@ def create_score_summary(challenge_data: dict, scoring_results: list[dict]) -> N
     logger.info(f"Score: {score}")
 
 async def main(
-    challenge_file_with_solutions: str,
+    solutions_file: str,
     output_folder: str,
     submission_folder_relative: Optional[str],
 ):
@@ -86,11 +86,11 @@ async def main(
     if not output_folder.is_absolute():
         output_folder = Path.cwd() / output_folder
 
-    logger.info(f"Loading challenge data from {challenge_file_with_solutions}")
-    challenge_file_with_solutions = Path(challenge_file_with_solutions)
-    if not challenge_file_with_solutions.is_absolute():
-        challenge_file_with_solutions = Path.cwd() / challenge_file_with_solutions
-    challenge_data = json.loads(read_file(challenge_file_with_solutions))
+    logger.info(f"Loading solutions from {solutions_file}")
+    solutions_file = Path(solutions_file)
+    if not solutions_file.is_absolute():
+        solutions_file = Path.cwd() / solutions_file
+    solutions = json.loads(read_file(solutions_file))
 
     scoring_results = []
     for subfolder in output_folder.iterdir():
@@ -103,18 +103,17 @@ async def main(
         puzzle_submission = json.loads(read_file(puzzle_submission_file))
         assert len(puzzle_submission) == 1, "Only one puzzle submission is supported"
         puzzle_id = list(puzzle_submission.keys())[0]
-        if puzzle_id not in challenge_data:
-            logger.warning(f"Puzzle {puzzle_id} not found in challenge data")
+        if puzzle_id not in solutions:
+            logger.warning(f"Puzzle {puzzle_id} not found in solutions file")
             continue
-        score_for_attempts = score_puzzle_submission(challenge_data[puzzle_id], puzzle_submission[puzzle_id])
+        score_for_attempts = score_puzzle_submission(solutions[puzzle_id], puzzle_submission[puzzle_id])
 
+        sample_index = None  # Default value when submission_folder_relative is not provided
         if submission_folder_relative is not None:
             submission_metadata_file = subfolder / submission_folder_relative / "metadata.json"
             if submission_metadata_file.exists():
                 submission_metadata = json.loads(read_file(submission_metadata_file))
                 sample_index = submission_metadata["sample_index"]
-            else:
-                sample_index = -1    # Special value for no sample index
 
         metadata_file = subfolder / "metadata.json"
         duration_seconds = 0
@@ -132,7 +131,7 @@ async def main(
             }
         )
 
-    create_score_summary(challenge_data, scoring_results)
+    create_score_summary(solutions, scoring_results)
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -140,10 +139,10 @@ def parse_arguments():
         description="Score grid descriptions in submission files using a judge model"
     )
     parser.add_argument(
-        "--challenge_file_with_solutions",
+        "--solutions_file",
         type=str,
         required=True,
-        help="Path to the challenge JSON file including solutions in ARC Prize format",
+        help="Path to the solutions JSON file in ARC Prize format",
     )
     parser.add_argument(
         "-o",
@@ -172,7 +171,7 @@ def main_cli():
 
     asyncio.run(
         main(
-            challenge_file_with_solutions=args.challenge_file_with_solutions,
+            solutions_file=args.solutions_file,
             output_folder=args.output_folder,
             submission_folder_relative=args.submission_folder_relative,
         )
