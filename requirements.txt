@@ -1,0 +1,10 @@
+# Used in Kaggle. Keep it synced with pyproject.toml.
+anthropic==0.75.0
+daytona==0.129.0
+httpx==0.28.1
+ipybox==0.6.2
+jsonschema==4.25.1
+openai==2.14.0
+pydantic==2.12.5
+python-dotenv==1.2.1
+pandas==2.3.3

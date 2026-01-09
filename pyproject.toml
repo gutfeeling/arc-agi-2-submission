@@ -21,7 +21,7 @@ dependencies = [
     "pydantic==2.12.5",
     "python-dotenv==1.2.1",
     "pandas==2.3.3",
-]
+]    # Keep this in sync with requirements.txt as we use that in Kaggle.
 
 [project.scripts]
 arcagi2-solve = "arcagi2.solver.solver:main_cli"
