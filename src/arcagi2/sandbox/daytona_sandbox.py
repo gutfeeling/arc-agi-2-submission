@@ -181,19 +181,6 @@ class DaytonaSandbox(Sandbox):
             config.target = self.target
         self._daytona = AsyncDaytona(config)
         
-        # Workaround for Daytona SDK bug: _api_clients is a class variable shared across
-        # all AsyncDaytona instances. When one instance closes, it closes all clients.
-        # Fix: give this instance its own isolated client list, and remove from class list
-        # to prevent memory leak (class list never gets cleaned up).
-        # Already fixed in Daytona main branch, but they haven't released yet.
-        # See: https://github.com/daytonaio/daytona/commit/13542e5677668ed03279ac27596db3e01e22be7d
-        # TODO: Remove after upgrading to daytona SDK version with the fix
-        self._daytona._api_clients = [self._daytona._api_client]
-        try:
-            AsyncDaytona._api_clients.remove(self._daytona._api_client)
-        except ValueError:
-            pass  # Already removed or not present
-        
         self._sandbox = None
     
     async def __aenter__(self) -> Self:
