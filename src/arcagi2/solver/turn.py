@@ -155,12 +155,14 @@ class AbstractTurn(ABC):
                     # are not due to long thinking. We can safely retry with exponential backoff.
                     # httpx.TimeoutException: Can leak through during streaming when OpenAI SDK doesn't wrap it.
                     backoff_attempt += 1
-                    infra_logger.exception(f"Infrastructure error, retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s)")
+                    infra_logger.error(f"Infrastructure error, retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s): {e}")
+                    logger.exception(f"Infrastructure error, retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s)")
                     await asyncio.sleep(delay)
                     delay = min(delay * self.delay_multiplier, self.max_delay)
                     continue
                 else:
-                    infra_logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)")
+                    infra_logger.error(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error) : {e}")
+                    logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)")
                     raise MaxRetriesExceeded(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)") from e
             try:
                 return self.PARSED_TURN_RESULT_CLS.from_turn_result(result)

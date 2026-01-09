@@ -183,12 +183,14 @@ class Sandbox(ABC):
             except SandboxInfrastructureError as e:
                 if backoff_attempt < max_backoff_retries:
                     backoff_attempt += 1
-                    infra_logger.exception("Sandbox infrastructure error, retrying with backoff (attempt %d/%d, delay %.1fs)", backoff_attempt, max_backoff_retries, delay)
+                    infra_logger.error(f"Sandbox infrastructure error, retrying with backoff (attempt {backoff_attempt}/{max_backoff_retries}, delay {delay}s): {e}")
+                    logger.exception("Sandbox infrastructure error, retrying with backoff (attempt %d/%d, delay %.1fs)", backoff_attempt, max_backoff_retries, delay)
                     await asyncio.sleep(delay)
                     delay = min(delay * delay_multiplier, max_delay)
                     continue
                 else:
-                    infra_logger.exception(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error)")
+                    infra_logger.error(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error): {e}")
+                    logger.exception(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error)")
                     raise MaxRetriesExceeded(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error)") from e
             else:
                 break
