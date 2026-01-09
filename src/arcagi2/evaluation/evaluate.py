@@ -33,12 +33,17 @@ async def evaluate(
     resume: bool,
     env_file: Optional[str] = None,    # allowing None because it's cumbersome to use dotenv in Kaggle. It's easier to just set os.environ directly from data in User Secrets.
 ) -> None:
-    # Configure console output for infrastructure issues (rate limits, connection errors, sandbox failures)
-    # Setting up here since Kaggle notebooks will use the function directly instead of running this file as a script.
-    setup_infra_logger_console_handler(logging.WARNING)
+
+    # Set up root logger to INFO level
+    logging.getLogger().setLevel(logging.INFO)
     # Silence noisy HTTP client logs (Responses API background mode polling creates a lot of noise)
     # We save all logs to files, so we would need a lot of space. This is especially bad in Kaggle I guess.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    # Configure console output for infrastructure issues (rate limits, connection errors, sandbox failures)
+    # Setting up here since Kaggle notebooks will use the function directly instead of running this file as a script.
+    setup_infra_logger_console_handler(logging.WARNING)
+
 
     if env_file is not None:
         logger.info(f"Loading environment variables from {env_file}")
@@ -290,9 +295,6 @@ def parse_arguments() -> argparse.Namespace:
 def main_cli() -> None:
     args = parse_arguments()
 
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-
     asyncio.run(
         evaluate(
             challenge_file=args.challenge_file,
@@ -306,7 +308,6 @@ def main_cli() -> None:
             env_file=args.env_file,
         )
     )
-
 
 if __name__ == "__main__":
     main_cli()
