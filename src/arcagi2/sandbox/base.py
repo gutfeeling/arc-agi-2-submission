@@ -6,13 +6,6 @@ Defines the minimal interface that all execution backends must implement:
 - REPL: Stateful code execution within a sandbox
 - ExecutionResult: Result of code execution
 - ExecutionError: Exception for user code failures
-
-Error Handling Contract:
-    - User code errors (syntax errors, runtime exceptions in user code) → ExecutionError
-    - Infrastructure errors (network, API, sandbox crashed) → Propagated as-is
-    
-    Callers should catch ExecutionError for user code failures, and handle
-    infrastructure errors (e.g., with retry logic) separately.
 """
 
 from abc import ABC, abstractmethod
