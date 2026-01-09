@@ -14,6 +14,7 @@ from daytona import AsyncDaytona, DaytonaConfig, DaytonaError, DaytonaTimeoutErr
 
 from arcagi2.sandbox.base import ExecutionError, ExecutionResult, REPL, Sandbox
 from arcagi2.sandbox.exceptions import SandboxInfrastructureError, ExecutionTimeoutError
+from arcagi2.utils.logging_utils import infra_logger
 
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ class DaytonaSandbox(Sandbox):
                 await self._sandbox.delete()
                 logger.info("Daytona sandbox deleted")
             except DaytonaError as e:
-                logger.warning(f"Failed to delete Daytona sandbox: {e}")
+                infra_logger.warning(f"Failed to delete Daytona sandbox: {e}")
             finally:
                 self._sandbox = None
         

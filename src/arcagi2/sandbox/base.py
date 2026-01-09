@@ -16,6 +16,7 @@ from typing import Optional, Self
 
 from arcagi2.exceptions import MaxRetriesExceeded
 from arcagi2.sandbox.exceptions import SandboxInfrastructureError
+from arcagi2.utils.logging_utils import infra_logger
 
 
 logger = logging.getLogger(__name__)
@@ -180,14 +181,14 @@ class Sandbox(ABC):
                         for cell in cells:
                             results.append(await repl.execute(code=cell, timeout=timeout))
             except SandboxInfrastructureError as e:
-                logger.exception(f"Sandbox infrastructure error occurred. Retrying with exponential backoff.")
                 if backoff_attempt < max_backoff_retries:
+                    backoff_attempt += 1
+                    infra_logger.exception("Sandbox infrastructure error, retrying with backoff (attempt %d/%d, delay %.1fs)", backoff_attempt, max_backoff_retries, delay)
                     await asyncio.sleep(delay)
                     delay = min(delay * delay_multiplier, max_delay)
-                    backoff_attempt += 1
                     continue
                 else:
-                    logger.exception(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error)")
+                    infra_logger.exception(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error)")
                     raise MaxRetriesExceeded(f"Failed to run cells after {max_backoff_retries} retries (for infrastructure error)") from e
             else:
                 break

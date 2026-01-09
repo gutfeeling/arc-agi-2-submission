@@ -28,6 +28,7 @@ from arcagi2.exceptions import MaxRetriesExceeded
 from arcagi2.sandbox.exceptions import SandboxInfrastructureError
 from arcagi2.solver.exceptions import InvalidTurnResult
 from arcagi2.tools.repl_tool import REPLTool
+from arcagi2.utils.logging_utils import infra_logger
 from arcagi2.utils.utils import (
     get_code_matches, 
     save_jsonl, 
@@ -153,13 +154,13 @@ class AbstractTurn(ABC):
                     # AnthropicAPITimeoutError: We use streaming for anthropic, so timeout errors
                     # are not due to long thinking. We can safely retry with exponential backoff.
                     # httpx.TimeoutException: Can leak through during streaming when OpenAI SDK doesn't wrap it.
-                    logger.exception("Infrastructure error, retrying with exponential backoff...")
+                    backoff_attempt += 1
+                    infra_logger.exception(f"Infrastructure error, retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s)")
                     await asyncio.sleep(delay)
                     delay = min(delay * self.delay_multiplier, self.max_delay)
-                    backoff_attempt += 1
                     continue
                 else:
-                    logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)")
+                    infra_logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)")
                     raise MaxRetriesExceeded(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)") from e
             try:
                 return self.PARSED_TURN_RESULT_CLS.from_turn_result(result)

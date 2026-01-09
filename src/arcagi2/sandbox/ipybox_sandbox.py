@@ -12,6 +12,7 @@ from ipybox import ExecutionClient, ExecutionContainer, ExecutionError as IPyBox
 
 from arcagi2.sandbox.base import ExecutionError, ExecutionResult, REPL, Sandbox
 from arcagi2.sandbox.exceptions import SandboxInfrastructureError, ExecutionTimeoutError
+from arcagi2.utils.logging_utils import infra_logger
 
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ class IPyBoxSandbox(Sandbox):
                 await self._container.__aexit__(exc_type, exc_val, exc_tb)
                 logger.info("IPyBox container stopped")
             except Exception as e:
-                logger.warning(f"Failed to delete sandbox: {e}")
+                infra_logger.warning(f"Failed to delete IPyBox container: {e}")
             finally:
                 self._container = None
     
