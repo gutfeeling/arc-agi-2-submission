@@ -172,11 +172,13 @@ class AbstractTurn(ABC):
                     raise MaxRetriesExceeded(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)") from e
             except AnthropicAPIStatusError as e:
                 # Catch overloaded error (529) for backoff retry
-                if e.status_code == 529:
+                # Check both status_code and error body since streaming errors may not set status_code
+                is_overloaded = e.status_code == 529 or "overloaded_error" in str(e)
+                if is_overloaded:
                     if backoff_attempt < self.max_backoff_retries:
                         backoff_attempt += 1
-                        infra_logger.error(f"API overloaded (529), retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s): {e}")
-                        logger.exception(f"API overloaded (529), retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s)")
+                        infra_logger.error(f"API overloaded, retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s): {e}")
+                        logger.exception(f"API overloaded, retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s)")
                         await asyncio.sleep(delay)
                         delay = min(delay * self.delay_multiplier, self.max_delay)
                         continue
