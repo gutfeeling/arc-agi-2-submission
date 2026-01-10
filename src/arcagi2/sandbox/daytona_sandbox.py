@@ -5,6 +5,25 @@ Wraps the Daytona SDK to provide cloud-based code execution sandboxes
 using IPython for rich REPL behavior.
 """
 
+# Patch Daytona's websocket ping_timeout BEFORE importing daytona.
+# The default 20s ping_timeout causes "keepalive ping timeout" errors
+# when code execution takes longer than ~40 seconds (ping_interval + ping_timeout).
+# This patches only Daytona's code_interpreter modules, not global websockets.
+import websockets.asyncio.client as _ws_client
+import daytona._async.code_interpreter as _daytona_async_code
+import daytona._sync.code_interpreter as _daytona_sync_code
+
+DAYTONA_WS_PING_TIMEOUT = 150  # Code execution timeout must be less than this
+
+class _PatchedConnect(_ws_client.connect):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("ping_timeout", DAYTONA_WS_PING_TIMEOUT)
+        super().__init__(*args, **kwargs)
+
+_daytona_async_code.connect = _PatchedConnect
+_daytona_sync_code.connect = _PatchedConnect
+# End of Daytona websocket patch
+
 import logging
 import os
 import re
@@ -56,7 +75,7 @@ _ipython_shell = InteractiveShellEmbed()
             result = await self._sandbox.code_interpreter.run_code(
                 code=self._IPYTHON_SETUP,
                 context=self._context,
-                timeout=60,    # Setting a reasonable fixed timeout value for this
+                timeout=60,    # Setting a reasonable fixed timeout value (smaller than DAYTONA_WS_PING_TIMEOUT) for this
             )
             
             if result.error is not None:
@@ -86,6 +105,13 @@ _ipython_shell = InteractiveShellEmbed()
     async def execute(self, code: str, timeout: float) -> ExecutionResult:
         if not self._ipython_ready:
             raise RuntimeError("IPython shell not initialized. Use 'async with' context manager.")
+        
+        # Fail fast if timeout is larger than websocket ping_timeout
+        if timeout > DAYTONA_WS_PING_TIMEOUT:
+            raise ValueError(
+                f"Code timeout ({timeout}s) exceeds safe limit ({DAYTONA_WS_PING_TIMEOUT}s). "
+                f"Increase DAYTONA_WS_PING_TIMEOUT in daytona_sandbox.py to at least {timeout}s."
+            )
         
         logger.info(f"Executing code:\n{code}")
         
