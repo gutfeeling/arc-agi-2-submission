@@ -1289,7 +1289,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         tool_use_blocks = self.extract_tool_use_blocks(response)
         for block in tool_use_blocks:
             try:
-                tool = self.find_tool(block.name, tools)
+                tool = self._find_tool(block.name, tools)
                 tool.validate_arguments(block.input)
             except Exception:
                 logger.exception("Malformed tool_use found in Anthropic response")
