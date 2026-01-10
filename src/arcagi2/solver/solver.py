@@ -248,10 +248,8 @@ async def solver(
                 return
             best_solution_path = choose_best_solution(output_folder)
             logger.info(f"Best solution path: {best_solution_path}")
-            best_solution_sample_index = int(best_solution_path.parents[0].name.split("_")[-1])
             first_working_solution_path = get_first_working_solution(output_folder)
             logger.info(f"First working solution path: {first_working_solution_path}")
-            first_working_solution_sample_index = int(first_working_solution_path.parents[0].name.split("_")[-1])
             extended_submission_folder = output_folder / "submission" / "extended"
             core_submission_folder = output_folder / "submission" / "core"
             if best_solution_path is not None:
@@ -264,7 +262,7 @@ async def solver(
                 metadata_file_path = extended_submission_folder / "metadata.json"
                 logger.info(f"Saving best solution metadata to {metadata_file_path}")
                 save_json(
-                    {"sample_index": best_solution_sample_index}, 
+                    {"sample_index": int(best_solution_path.parents[0].name.split("_")[-1])}, 
                     metadata_file_path
                 )
 
@@ -379,7 +377,7 @@ async def solver(
                 metadata_file_path = core_submission_folder / "metadata.json"
                 logger.info(f"Saving first working solution metadata to {metadata_file_path}")
                 save_json(
-                    {"sample_index": first_working_solution_sample_index}, 
+                    {"sample_index": int(first_working_solution_path.parents[0].name.split("_")[-1])}, 
                     metadata_file_path
                 )
 
