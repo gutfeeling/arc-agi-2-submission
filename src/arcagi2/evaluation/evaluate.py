@@ -127,6 +127,7 @@ async def evaluate(
         output_folder=output_folder,
         total_puzzles=total_puzzles,
         eval_start_time=eval_start_time,
+        resume=resume,
         # Following params are hardcoded to sane values. If we need to change them, they can also become an argument of `evaluate` later.
         poll_interval=10,
         max_rows=10,

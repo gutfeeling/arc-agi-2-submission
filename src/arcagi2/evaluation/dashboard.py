@@ -31,6 +31,7 @@ class StatusDashboard:
         output_folder: Path,
         total_puzzles: int,
         eval_start_time: datetime,
+        resume: bool,
         poll_interval: float = 5,
         max_rows: int = 5,    # Max rows to show per section before "+ N more"
     ):
@@ -43,6 +44,11 @@ class StatusDashboard:
         # Track previous state to detect changes
         # Key: submission_id, Value: (status, solver_status)
         self._prev_state: dict[str, tuple[EvaluationStatus, SolverStatus]] = {}
+        
+        # If resuming, capture existing dirs to exclude from tracking
+        self._exclude_dirs: set[str] = set()
+        if resume and output_folder.exists():
+            self._exclude_dirs = {d.name for d in output_folder.iterdir() if d.is_dir()}
 
     def _scan_status(self) -> dict[str, tuple[EvaluationMetadata, SolverStatus]]:
         """Scan output folder and return current state of all items."""
@@ -53,6 +59,8 @@ class StatusDashboard:
 
         for subfolder in self.output_folder.iterdir():
             if not subfolder.is_dir():
+                continue
+            if subfolder.name in self._exclude_dirs:
                 continue
             metadata_file = subfolder / "metadata.json"
             if not metadata_file.exists():
