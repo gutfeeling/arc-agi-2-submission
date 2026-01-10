@@ -9,13 +9,16 @@ from typing import Callable, Optional
 
 from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
+from anthropic import APIStatusError as AnthropicAPIStatusError
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
 import httpx
 from jsonschema import validate, ValidationError
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 from openai import BadRequestError as OpenAIBadRequestError
+from openai import InternalServerError as OpenAIInternalServerError
 from openai import RateLimitError as OpenAIRateLimitError
 
 from arcagi2.api.clients import AbstractAPIClient, TurnResult
@@ -148,6 +151,8 @@ class AbstractTurn(ABC):
                 AnthropicRateLimitError,
                 OpenAIAPITimeoutError,
                 AnthropicAPITimeoutError,
+                OpenAIInternalServerError,
+                AnthropicInternalServerError,
                 httpx.TimeoutException,  # Catches ReadTimeout, WriteTimeout, ConnectTimeout, PoolTimeout,
                 SandboxInfrastructureError,
             ) as e:
@@ -165,6 +170,22 @@ class AbstractTurn(ABC):
                     infra_logger.error(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error) : {e}")
                     logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)")
                     raise MaxRetriesExceeded(f"Failed to get response after {self.max_backoff_retries} retries (for infrastructure error)") from e
+            except AnthropicAPIStatusError as e:
+                # Catch overloaded error (529) for backoff retry
+                if e.status_code == 529:
+                    if backoff_attempt < self.max_backoff_retries:
+                        backoff_attempt += 1
+                        infra_logger.error(f"API overloaded (529), retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s): {e}")
+                        logger.exception(f"API overloaded (529), retrying with backoff (attempt {backoff_attempt}/{self.max_backoff_retries}, delay {delay}s)")
+                        await asyncio.sleep(delay)
+                        delay = min(delay * self.delay_multiplier, self.max_delay)
+                        continue
+                    else:
+                        infra_logger.error(f"Failed to get response after {self.max_backoff_retries} retries (for API overloaded): {e}")
+                        logger.exception(f"Failed to get response after {self.max_backoff_retries} retries (for API overloaded)")
+                        raise MaxRetriesExceeded(f"Failed to get response after {self.max_backoff_retries} retries (for API overloaded)") from e
+                else:
+                    raise
             try:
                 return self.PARSED_TURN_RESULT_CLS.from_turn_result(result)
             except InvalidTurnResult as e:
