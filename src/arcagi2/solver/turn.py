@@ -63,9 +63,10 @@ class AbstractTurn(ABC):
                     cot_file_path = dir / "cot.txt"
                     logger.info(f"Saving COT to {cot_file_path}")
                     code_interpreter_tool_name = None
-                    for tool in config.tools:
-                        if isinstance(tool, REPLTool):
-                            code_interpreter_tool_name = tool.name
+                    if config.tools is not None:
+                        for tool in config.tools:
+                            if isinstance(tool, REPLTool):
+                                code_interpreter_tool_name = tool.name
                     save_text(
                         config.client_class.get_readable_trace(
                             self.trace, 
