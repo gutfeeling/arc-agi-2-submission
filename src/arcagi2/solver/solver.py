@@ -208,7 +208,7 @@ async def solver(
                                 max_backoff_retries=config.max_backoff_retries,
                                 **config.sandbox_kwargs,
                             )
-                        except:
+                        except Exception:
                             logger.exception(f"Error running solution")
                             logger.info(f"We won't include the solution in the initial code")
                         else:
@@ -317,7 +317,7 @@ async def solver(
                         max_backoff_retries=config.max_backoff_retries,
                         **config.sandbox_kwargs,
                     )
-                except:
+                except Exception:
                     logger.exception(f"Error running solution")
                     logger.info(f"We won't include the solution in the initial code")
                 else:

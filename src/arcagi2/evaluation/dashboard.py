@@ -62,7 +62,7 @@ class StatusDashboard:
                 metadata = EvaluationMetadata.from_dict(data)
                 solver_status = SolverStatus.from_output_folder(subfolder)
                 items[metadata.submission_id] = (metadata, solver_status)
-            except:
+            except Exception:
                 continue
 
         return items

@@ -79,7 +79,7 @@ async def verify_solution(
             timeout=config.code_timeout,
             **config.sandbox_kwargs,
         )
-    except:
+    except Exception:
         logger.exception(f"Error checking if solution works on training examples")
 
     try:
@@ -95,7 +95,7 @@ async def verify_solution(
             timeout=config.code_timeout,
             **config.sandbox_kwargs,
         )
-    except:
+    except Exception:
         logger.exception(f"Error getting coverage report")
 
     result = VerificationResult(
