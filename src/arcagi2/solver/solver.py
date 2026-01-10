@@ -500,7 +500,11 @@ def main_cli() -> None:
     config = SOLVER_CONFIGS[args.config_name]
     root_logger.info(f"Using config: {args.config_name}")
 
-    puzzle_json = json.load(open(args.puzzle_json_path))
+    puzzle_path = Path(args.puzzle_json_path)
+    if not puzzle_path.is_absolute():
+        puzzle_path = Path.cwd() / puzzle_path
+    puzzle_id = puzzle_path.stem
+    puzzle_json = json.loads(read_file(puzzle_path))
 
     output_folder = Path(args.output_folder)
 
@@ -514,6 +518,7 @@ def main_cli() -> None:
     asyncio.run(
         solver(
             config=config,
+            puzzle_id=puzzle_id,
             puzzle_json=puzzle_json,
             output_folder=output_folder,
         )
