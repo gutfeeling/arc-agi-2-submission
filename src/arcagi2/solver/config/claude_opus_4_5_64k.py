@@ -1,7 +1,13 @@
 from arcagi2.api.clients import AsyncMessagesAPIClient
 from arcagi2.api.providers import ANTHROPIC_API_PROVIDER
-from arcagi2.sandbox.ipybox_sandbox import IPyBoxSandbox
-from arcagi2.solver.config.base import InterleavedThinkingConfig, PROMPTS_FOLDER, IPYBOX_SANDBOX_CLS, IPYBOX_SANDBOX_KWARGS
+from arcagi2.solver.config.base import (
+    InterleavedThinkingConfig, 
+    PROMPTS_FOLDER, 
+    DAYTONA_SANDBOX_CLS,
+    DAYTONA_SANDBOX_KWARGS,
+    IPYBOX_SANDBOX_CLS,
+    IPYBOX_SANDBOX_KWARGS,
+)
 from arcagi2.tools.repl_tool import REPLToolWithProtection
 
 
@@ -25,32 +31,52 @@ _COMMON_KWARGS = dict(
     tools=[REPLToolWithProtection(name="python", timeout=120, protected_variables=["puzzle"])],
     max_retries=2,
     sleep=0,
-    sandbox_cls=IPYBOX_SANDBOX_CLS,
-    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
     initial_code_timeout=120,
     cache_ttl="5m"
 )
 
-INTERLEAVED_THINKING_SOLVER = AsyncMessagesAPIClient.MessagesAPICallConfig(
+_IPYBOX_COMMON_KWARGS = dict(
     **_COMMON_KWARGS,
-    prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
+    sandbox_cls=IPYBOX_SANDBOX_CLS,
+    sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
 )
 
-SOFT_VERIFIER = AsyncMessagesAPIClient.MessagesAPICallConfig(
+_DAYTONA_COMMON_KWARGS = dict(
     **_COMMON_KWARGS,
-    prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-)
-
-GENERALIZER = AsyncMessagesAPIClient.MessagesAPICallConfig(
-    **_COMMON_KWARGS,
-    prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+    sandbox_cls=DAYTONA_SANDBOX_CLS,
+    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
 )
 
 CLAUDE_OPUS_4_5_64K_SYSTEM_CONFIG = InterleavedThinkingConfig(
     sandbox_cls=IPYBOX_SANDBOX_CLS,
     sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
-    interleaved_thinking_solver=INTERLEAVED_THINKING_SOLVER,
-    soft_verifier=SOFT_VERIFIER,
-    generalizer=GENERALIZER,
+    interleaved_thinking_solver=AsyncMessagesAPIClient.MessagesAPICallConfig(
+        **_IPYBOX_COMMON_KWARGS,
+        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
+    ),
+    soft_verifier=AsyncMessagesAPIClient.MessagesAPICallConfig(
+        **_IPYBOX_COMMON_KWARGS,
+        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
+    ),
+    generalizer=AsyncMessagesAPIClient.MessagesAPICallConfig(
+        **_IPYBOX_COMMON_KWARGS,
+        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+    ),
 )
 
+CLAUDE_OPUS_4_5_64K_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
+    sandbox_cls=DAYTONA_SANDBOX_CLS,
+    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
+    interleaved_thinking_solver=AsyncMessagesAPIClient.MessagesAPICallConfig(
+        **_DAYTONA_COMMON_KWARGS,
+        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
+    ),
+    soft_verifier=AsyncMessagesAPIClient.MessagesAPICallConfig(
+        **_DAYTONA_COMMON_KWARGS,
+        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
+    ),
+    generalizer=AsyncMessagesAPIClient.MessagesAPICallConfig(
+        **_DAYTONA_COMMON_KWARGS,
+        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+    ),
+)
