@@ -81,6 +81,7 @@ async def score_submission(
     solutions_file: str,
     output_folder: str,
     submission_folder_relative: Optional[str],
+    submission_metadata_folder_relative: Optional[str],
 ):
     logging.basicConfig(
         level=logging.INFO,
@@ -111,7 +112,10 @@ async def score_submission(
             if metadata.duration_seconds is not None:
                 duration_seconds = metadata.duration_seconds
 
-        puzzle_submission_file = subfolder / "submission.json"
+        if submission_folder_relative is not None:
+            puzzle_submission_file = subfolder / submission_folder_relative / "submission.json"
+        else:
+            puzzle_submission_file = subfolder / "submission.json"
         if not puzzle_submission_file.exists():
             continue
         puzzle_submission = json.loads(read_file(puzzle_submission_file))
@@ -123,8 +127,8 @@ async def score_submission(
         score_for_attempts = score_puzzle_submission(solutions[puzzle_id], puzzle_submission[puzzle_id])
 
         sample_index = None  # Default value when submission_folder_relative is not provided
-        if submission_folder_relative is not None:
-            submission_metadata_file = subfolder / submission_folder_relative / "metadata.json"
+        if submission_metadata_folder_relative is not None:
+            submission_metadata_file = subfolder / submission_metadata_folder_relative / "metadata.json"
             if submission_metadata_file.exists():
                 submission_metadata = json.loads(read_file(submission_metadata_file))
                 sample_index = submission_metadata["sample_index"]
@@ -160,10 +164,16 @@ def parse_arguments():
         help="Path to the output folder created by the evaluation script",
     )
     parser.add_argument(
-        "-r",
+        "-s",
         "--submission_folder_relative",
         type=str,
-        help="Relative path of the folder (with respect to the solver's output folder root) containing sample index information. 'submission/extended' or 'submission/core'. Not required for plain COT solvers.",
+        help="Relative path of the folder (with respect to the solver's output folder root) containing the submission.json file. Set this to 'submission/core' to score the core system. Not required for extended system or plain COT solvers.",
+    )
+    parser.add_argument(
+        "-m",
+        "--submission_metadata_folder_relative",
+        type=str,
+        help="Relative path of the folder (with respect to the solver's output folder root) containing the submission metadata file with sample index information. 'submission/extended' or 'submission/core'. Not required for plain COT solvers.",
     )
     args = parser.parse_args()
 
@@ -177,6 +187,7 @@ def main_cli():
             solutions_file=args.solutions_file,
             output_folder=args.output_folder,
             submission_folder_relative=args.submission_folder_relative,
+            submission_metadata_folder_relative=args.submission_metadata_folder_relative,
         )
     )
 
