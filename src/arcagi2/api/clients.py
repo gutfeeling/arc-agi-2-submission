@@ -858,7 +858,10 @@ class AsyncResponsesAPIClient(AbstractAPIClient):
             logger.info(f"Background mode enabled, polling for response (ID: {response.id})")
             response = await self._handle_background_response(response, background_mode_polling_interval)
         logger.info(f"Response output text:\n{response.output_text}")
-        logger.info(f"Tokens consumed by this call: {self.token_consumption_from_response(response)}")
+        try:
+            logger.info(f"Tokens consumed by this call: {self.token_consumption_from_response(response)}")
+        except Exception:
+            logger.exception("Failed to get token consumption from response")
         return RawTurnResult(
             response=response,
             trace=[
