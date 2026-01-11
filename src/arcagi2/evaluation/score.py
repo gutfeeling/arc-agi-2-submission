@@ -7,7 +7,7 @@ from typing import Optional
 
 import pandas as pd
 
-from arcagi2.evaluation.utils import EvaluationMetadata
+from arcagi2.evaluation.utils import EvaluationMetadata, EvaluationStatus
 from arcagi2.utils.utils import read_file
 
 
@@ -102,6 +102,15 @@ async def score_submission(
         if not subfolder.is_dir():
             continue
 
+        metadata_file = subfolder / "metadata.json"
+        duration_seconds = 0
+        if metadata_file.exists():
+            metadata = EvaluationMetadata.from_dict(json.loads(read_file(metadata_file)))
+            if metadata.status not in [EvaluationStatus.SUCCESS, EvaluationStatus.TIMEOUT]:
+                continue
+            if metadata.duration_seconds is not None:
+                duration_seconds = metadata.duration_seconds
+
         puzzle_submission_file = subfolder / "submission.json"
         if not puzzle_submission_file.exists():
             continue
@@ -120,12 +129,6 @@ async def score_submission(
                 submission_metadata = json.loads(read_file(submission_metadata_file))
                 sample_index = submission_metadata["sample_index"]
 
-        metadata_file = subfolder / "metadata.json"
-        duration_seconds = 0
-        if metadata_file.exists():
-            metadata = EvaluationMetadata.from_dict(json.loads(read_file(metadata_file)))
-            if metadata.duration_seconds is not None:
-                duration_seconds = metadata.duration_seconds
         scoring_results.append(
             {
                 "puzzle_id": puzzle_id, 
