@@ -1045,6 +1045,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
                 result = await client.create_message(
                     model=config.model,
                     messages=messages,
+                    cache_ttl=config.cache_ttl,
                     **config.request_kwargs
                 )
             else:
