@@ -25,7 +25,8 @@ from arcagi2.api.clients import AbstractAPIClient, TurnResult
 from arcagi2.api.exceptions import (
     InvalidChatCompletionException, 
     InvalidMessageException,
-    InvalidResponseException
+    InvalidResponseException,
+    StreamingError
 )
 from arcagi2.exceptions import MaxRetriesExceeded
 from arcagi2.sandbox.exceptions import SandboxInfrastructureError
@@ -155,6 +156,7 @@ class AbstractTurn(ABC):
                 AnthropicInternalServerError,
                 httpx.TimeoutException,  # Catches ReadTimeout, WriteTimeout, ConnectTimeout, PoolTimeout,
                 SandboxInfrastructureError,
+                StreamingError,
             ) as e:
                 if backoff_attempt < self.max_backoff_retries:
                     # AnthropicAPITimeoutError: We use streaming for anthropic, so timeout errors

@@ -15,3 +15,6 @@ class InvalidMessageException(Exception):
         self.stop_reason = stop_reason
         message = f"Invalid Anthropic Message API response with stop reason: {stop_reason}"
         super().__init__(message)
+
+class StreamingError(Exception):
+    pass

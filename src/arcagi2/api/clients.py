@@ -12,6 +12,7 @@ from arcagi2.sandbox.base import Sandbox
 import anthropic
 from anthropic import BadRequestError as AnthropicBadRequestError
 from anthropic.types.beta import BetaMessage
+import httpx
 from jsonschema.exceptions import ValidationError
 from openai import AsyncOpenAI
 from openai import BadRequestError as OpenAIBadRequestError
@@ -22,7 +23,8 @@ from pydantic import BaseModel, ValidationError as PydanticValidationError
 from arcagi2.api.exceptions import (
     InvalidChatCompletionException, 
     InvalidMessageException,
-    InvalidResponseException
+    InvalidResponseException,
+    StreamingError
 )
 from arcagi2.api.providers import APIProvider
 from arcagi2.api.utils import replace_developer_message, messages_contains_system_prompt
@@ -1035,7 +1037,11 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         api_key = os.getenv(api_provider.api_key_env_var) or kwargs.get("api_key")
         if api_key is None:
             raise ValueError(f"{api_provider.api_key_env_var} is not set")
-        self.client = anthropic.AsyncAnthropic(api_key=api_key)
+        self.client = anthropic.AsyncAnthropic(
+            api_key=api_key,
+            base_url=api_provider.base_url,
+            **kwargs
+        )
 
     @classmethod
     async def call(cls, config: MessagesAPICallConfig, messages: list[dict], initial_code: Optional[list[str]] = None, **kwargs):
@@ -1296,10 +1302,10 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
                 tool = self._find_tool(block.name, tools)
                 tool.validate_arguments(block.input)
             except Exception:
-                logger.exception("Malformed tool_use found in Anthropic response")
+                logger.exception("Malformed tool_use found in Anthropic Messages API response")
                 return True
         return False
-    
+
     async def create_message(
         self,
         model: str,
@@ -1313,11 +1319,18 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         else:
             logger.info(f"Prompt caching disabled")
             
-        logger.info(f"Sending request to Anthropic model: {model}")
+        logger.info(f"Sending request to model: {model}")
         
-        # Use streaming API to keep connection alive during long-running requests (> 10 min)
-        async with self.client.beta.messages.stream(model=model, messages=messages, **kwargs) as stream:
-            response = await stream.get_final_message()
+        # Use SDK's beta streaming helper with handling for transient streaming errors
+        # The handling is necessary because MiniMax API sometimes returns:
+        # - IndexError: when streaming events arrive out of order
+        # - httpx.ReadError/WriteError: connection dropped mid-stream
+        # - httpx.RemoteProtocolError: server protocol violation (assuming transient because we are dealing with production servers)
+        try:
+            async with self.client.beta.messages.stream(model=model, messages=messages, **kwargs) as stream:
+                response = await stream.get_final_message()
+        except (IndexError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError, httpx.ReadTimeout) as e:
+            raise StreamingError from e
         
         # Logging
         thinking_texts = self.extract_thinking_blocks(response)

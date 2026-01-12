@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from arcagi2.tools import base
+
 @dataclass
 class APIProvider:
     name: str
@@ -28,4 +30,10 @@ ANTHROPIC_API_PROVIDER = APIProvider(
     name="anthropic",
     base_url="https://api.anthropic.com/v1",
     api_key_env_var="ANTHROPIC_API_KEY"
+)
+
+MINIMAX_API_PROVIDER = APIProvider(
+    name="minimax",
+    base_url="https://api.minimax.io/anthropic",
+    api_key_env_var="MINIMAX_API_KEY"
 )
