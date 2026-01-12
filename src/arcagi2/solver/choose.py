@@ -45,7 +45,7 @@ def choose_best_solution(output_folder: Path) -> Union[Path, None]:
     The main metrics are:
     - Hard verification: do all training examples pass?
     - Soft verification based on LLM as a judge
-    - Smaller token count as a tie breaker if there is a tie after hard and soft verification.
+    - Smaller context usage (context used by the last step of the turn) as a tie breaker if there is a tie after hard and soft verification.
     - Optional metrics to tie break when training examples don't pass:
         - Shape mismatches: how many training examples have different shapes?
         - Total diff count: how many differences are there in the training examples?
@@ -130,14 +130,14 @@ def choose_best_solution(output_folder: Path) -> Union[Path, None]:
             # 6. Tie break equal flags by special_casing since about ~10% scoring solutions get flagged for color_arithmetic
             special_casing_count = sum(1 for flag in soft_verification_result if flag["property"] == "special_casing" and flag["decision"])
 
-        # Token count related metrics
+        # Context use related metrics
 
-        total_tokens = float("inf")
+        max_context = float("inf")
 
-        token_consumption_file_path = solution_dir / "token_consumption.json"
-        if token_consumption_file_path.exists():
-            token_consumption = json.loads(read_file(token_consumption_file_path))
-            total_tokens = token_consumption["total"]
+        max_context_file_path = solution_dir / "max_context.json"
+        if max_context_file_path.exists():
+            max_context_info = json.loads(read_file(max_context_file_path))
+            max_context = max_context_info["max_context"]
         
         # Store the solution with its metrics
         candidates.append({
@@ -150,8 +150,8 @@ def choose_best_solution(output_folder: Path) -> Union[Path, None]:
                 shape_mismatches,    # This will be zero if all training examples pass
                 total_diff_count,    # This will be zero if all training examples pass
                 # This will be the discrimator if there is a tie after hard and soft verification.
-                # Overthinking is generally bad, so we prefer solutions with fewer tokens.
-                total_tokens,
+                # Overthinking is generally bad, so we prefer solutions that used less context.
+                max_context,
                 total_errored,    # Total errored is the last because we haven't done generalization yet.
             )
         })
