@@ -26,7 +26,7 @@ async def evaluate(
     challenge_file: str,
     config_name: str,
     output_folder: str,  
-    vllm_base_url: str,
+    vllm_base_url: Optional[str],
     parallel: int,
     submission_folder: str,
     puzzle_timeout_minutes: int,
