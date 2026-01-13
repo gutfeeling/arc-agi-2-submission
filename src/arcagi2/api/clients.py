@@ -1329,7 +1329,7 @@ class AsyncMessagesAPIClient(AbstractAPIClient):
         try:
             async with self.client.beta.messages.stream(model=model, messages=messages, **kwargs) as stream:
                 response = await stream.get_final_message()
-        except (IndexError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError, httpx.ReadTimeout) as e:
+        except (IndexError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as e:
             raise StreamingError from e
         
         # Logging
