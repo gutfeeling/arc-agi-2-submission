@@ -27,7 +27,7 @@ _COMMON_KWARGS = dict(
     },
     tools=[REPLToolWithProtection(name="python", timeout=120, protected_variables=["puzzle"])],
     max_retries=2,
-    sleep=10,
+    sleep=0,
     initial_code_timeout=120,
     background_mode_polling_interval=2,
     stateful=True
@@ -42,7 +42,7 @@ _IPYBOX_COMMON_KWARGS = dict(
 _DAYTONA_COMMON_KWARGS = dict(
     **_COMMON_KWARGS,
     sandbox_cls=DAYTONA_SANDBOX_CLS,
-    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
+    sandbox_kwargs={**DAYTONA_SANDBOX_KWARGS, "target": "us"},    # Use US sandbox for Kaggle evaluation
 )
 
 GPT_5_2_XHIGH_SYSTEM_CONFIG = InterleavedThinkingConfig(
