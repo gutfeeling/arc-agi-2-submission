@@ -42,7 +42,7 @@ _IPYBOX_COMMON_KWARGS = dict(
 _DAYTONA_COMMON_KWARGS = dict(
     **_COMMON_KWARGS,
     sandbox_cls=DAYTONA_SANDBOX_CLS,
-    sandbox_kwargs={**DAYTONA_SANDBOX_KWARGS, "target": "us"},    # Use US sandbox for Kaggle evaluation
+    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
 )
 
 GPT_5_2_XHIGH_SYSTEM_CONFIG = InterleavedThinkingConfig(
@@ -64,7 +64,7 @@ GPT_5_2_XHIGH_SYSTEM_CONFIG = InterleavedThinkingConfig(
 
 GPT_5_2_XHIGH_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
     sandbox_cls=DAYTONA_SANDBOX_CLS,
-    sandbox_kwargs={**DAYTONA_SANDBOX_KWARGS, "target": "us"},    # Use US sandbox for Kaggle evaluation
+    sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
     interleaved_thinking_solver=AsyncResponsesAPIClient.ResponsesAPICallConfig(
         **_DAYTONA_COMMON_KWARGS,
         prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
