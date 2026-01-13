@@ -16,6 +16,7 @@ import httpx
 from jsonschema.exceptions import ValidationError
 from openai import AsyncOpenAI
 from openai import BadRequestError as OpenAIBadRequestError
+from openai.lib.streaming.chat import ChatCompletionStreamState
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.responses import Response
 from pydantic import BaseModel, ValidationError as PydanticValidationError
@@ -437,11 +438,47 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
     async def create_chat_completion(self, model: str, messages: list[Union[dict, ChatCompletionMessage]], **kwargs) -> RawTurnResult:
         messages = self._make_messages_compatible(messages)
         logger.info(f"Sending request to model: {model}")
-        response = await self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
-        )
+
+        stream = kwargs.get("stream", False)
+        
+        if stream:
+            # Use raw streaming to support custom fields like reasoning_content (Kimi K2, DeepSeek)
+            try:
+                state = ChatCompletionStreamState()
+                accumulated_reasoning = ""
+                
+                stream_response = await self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    **kwargs
+                )
+                
+                async for chunk in stream_response:
+                    # Let the SDK accumulate standard fields
+                    state.handle_chunk(chunk)
+                    
+                    # Manually accumulate reasoning_content (non-standard field)
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                            accumulated_reasoning += delta.reasoning_content
+                
+                # Get the final completion from accumulated state
+                response = state.get_final_completion()
+                
+                # Attach reasoning_content to the message if we accumulated any
+                if accumulated_reasoning:
+                    response.choices[0].message.reasoning_content = accumulated_reasoning
+                    
+            except (IndexError, httpx.ReadError, httpx.WriteError, httpx.RemoteProtocolError) as e:
+                raise StreamingError from e
+        else:
+            response = await self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **kwargs
+            )
+        
         # Defensive check for malformed response that happened once using a DeepSeek model in Openrouter
         if response.choices is None or len(response.choices) == 0:
             logger.error(f"Response has no choices: {response}")
@@ -449,7 +486,7 @@ class AsyncChatCompletionsAPIClient(AbstractAPIClient):
         logger.info(f"Response message content:\n{response.choices[0].message.content}")
         if self.api_provider.name == "openrouter" and hasattr(response.choices[0].message, "reasoning"):
             logger.info(f"Reasoning content:\n{response.choices[0].message.reasoning}")
-        elif self.api_provider.name in ["deepseek", "vllm"] and hasattr(response.choices[0].message, "reasoning_content"):
+        elif self.api_provider.name in ["deepseek", "vllm", "moonshot"] and hasattr(response.choices[0].message, "reasoning_content"):
             logger.info(f"Reasoning content:\n{response.choices[0].message.reasoning_content}")
         # OpenRouter providers often don't report token consumption in the response.
         try:
