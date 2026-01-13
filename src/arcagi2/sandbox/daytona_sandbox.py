@@ -180,7 +180,7 @@ class DaytonaSandbox(Sandbox):
                 result = await repl.execute("print('hello')")
     """
     
-    def __init__(self, image: Image, resources: Resources, creation_timeout: int, auto_stop_interval: int, api_key: Optional[str] = None, target: Optional[str] = None):
+    def __init__(self, image: Image, resources: Resources, creation_timeout: int, auto_stop_interval: int, api_key: Optional[str] = None):
         """
         Args:
             image: Daytona Image object (declarative image specification).
@@ -188,7 +188,6 @@ class DaytonaSandbox(Sandbox):
             creation_timeout: Timeout in seconds for sandbox creation.
             auto_stop_interval: Interval in minutes after which the sandbox will be stopped.
             api_key: Daytona API key (defaults to DAYTONA_API_KEY env var).
-            target: Daytona target (defaults to DAYTONA_TARGET env var).
         """
         self.image = image
         self.resources = resources
@@ -197,14 +196,9 @@ class DaytonaSandbox(Sandbox):
         self.api_key = api_key or os.environ.get("DAYTONA_API_KEY")
         if self.api_key is None:
             raise ValueError("Daytona API key is required. Set DAYTONA_API_KEY environment variable.")
-        self.target = target or os.environ.get("DAYTONA_TARGET")
-        if isinstance(target, str) and target not in ["eu", "us"]:
-            raise ValueError(f"Invalid Daytona target. Must be 'eu' or 'us'. Got {target}")
         
         # Set up config and client (but don't connect yet)
         config = DaytonaConfig(api_key=self.api_key)
-        if self.target is not None:
-            config.target = self.target
         self._daytona = AsyncDaytona(config)
         
         self._sandbox = None
