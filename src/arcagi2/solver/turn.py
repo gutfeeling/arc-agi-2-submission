@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 import asyncio
 from dataclasses import dataclass, asdict
-import json
 import logging
 from pathlib import Path
 import re
@@ -14,7 +13,6 @@ from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from anthropic import InternalServerError as AnthropicInternalServerError
 from anthropic import RateLimitError as AnthropicRateLimitError
 import httpx
-from jsonschema import validate, ValidationError
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 from openai import BadRequestError as OpenAIBadRequestError
@@ -39,7 +37,6 @@ from arcagi2.utils.utils import (
     save_text, 
     save_json, 
     code_block_defines_function,
-    get_json_matches,
 )
 
 logger = logging.getLogger(__name__)
@@ -319,58 +316,3 @@ class GridSolutionTurn(AbstractTurn):
                 raise InvalidTurnResult(f"Error getting output grid from model's response")
 
     PARSED_TURN_RESULT_CLS = GridSolution
-
-class SoftVerificationTurn(AbstractTurn):
-    """Expects model to output a JSON array containing objects fenced by ```json and ```."""
-
-    @dataclass
-    class SoftVerificationResult(AbstractTurn.AbstractParsedTurnResult):
-        DECISION_SCHEMA = {
-            "type": "array",
-            "minItems": 2,
-            "maxItems": 2,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "property": {"type": "string", "enum": ["special_casing", "color_arithmetic"]},
-                    "decision": {"type": "boolean"},
-                    "rationale": {"type": "string"}
-                },
-                "required": ["property", "decision", "rationale"]
-            }
-        }
-
-        decision: list[dict]
-
-        @property
-        def passed(self) -> bool:
-            if self.decision is not None:
-                if not any(property["decision"] for property in self.decision):
-                    return True
-            return False
-
-        def save_to_dir(self, dir: Path, config: AbstractAPIClient.CallConfig) -> None:
-            super().save_to_dir(dir, config)
-            decision_file_path = dir / "soft_verification.json"
-            logger.info(f"Saving decision to {decision_file_path}")
-            save_json(self.decision, decision_file_path)
-            
-        @classmethod
-        def from_turn_result(cls, result: TurnResult) -> "SoftVerificationTurn.SoftVerificationResult":
-            json_matches = get_json_matches(result.content)
-            if len(json_matches) == 0:
-                raise InvalidTurnResult("No JSON block returned by soft verifier")
-            try:
-                decision = json.loads(json_matches[-1].group(1))
-                validate(decision, cls.DECISION_SCHEMA)
-                logger.info(f"Decision:\n{decision}")
-                return cls(
-                    decision=decision,
-                    trace=result.trace
-                )
-            except json.JSONDecodeError as e:
-                raise InvalidTurnResult(f"Error parsing JSON")
-            except ValidationError as e:
-                raise InvalidTurnResult(f"Invalid decision format")
-
-    PARSED_TURN_RESULT_CLS = SoftVerificationResult

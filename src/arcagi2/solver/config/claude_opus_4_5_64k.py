@@ -47,36 +47,20 @@ _DAYTONA_COMMON_KWARGS = dict(
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
 )
 
-CLAUDE_OPUS_4_5_64K_SYSTEM_CONFIG = InterleavedThinkingConfig(
+CLAUDE_OPUS_4_5_64K_SOLVER_CONFIG = InterleavedThinkingConfig(
     sandbox_cls=IPYBOX_SANDBOX_CLS,
     sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncMessagesAPIClient.MessagesAPICallConfig(
+    call_config=AsyncMessagesAPIClient.MessagesAPICallConfig(
         **_IPYBOX_COMMON_KWARGS,
         prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
     ),
 )
 
-CLAUDE_OPUS_4_5_64K_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
+CLAUDE_OPUS_4_5_64K_DAYTONA_SOLVER_CONFIG = InterleavedThinkingConfig(
     sandbox_cls=DAYTONA_SANDBOX_CLS,
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncMessagesAPIClient.MessagesAPICallConfig(
+    call_config=AsyncMessagesAPIClient.MessagesAPICallConfig(
         **_DAYTONA_COMMON_KWARGS,
         prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
     ),
 )

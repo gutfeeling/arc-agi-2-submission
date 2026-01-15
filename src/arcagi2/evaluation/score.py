@@ -7,7 +7,7 @@ from typing import Optional
 
 import pandas as pd
 
-from arcagi2.evaluation.utils import EvaluationMetadata, EvaluationStatus
+from arcagi2.evaluation.utils import SampleMetadata, SampleStatus
 from arcagi2.utils.utils import read_file
 
 
@@ -53,10 +53,7 @@ def create_score_summary(solutions: dict[str, list[list[list[int]]]], scoring_re
     score_df_data = [
         {
             "puzzle_id": item["puzzle_id"],
-            "submission_id": item["submission_id"],
             "score_for_attempts": item["score_for_attempts"],
-            "duration_minutes": item["duration_seconds"] / 60,
-            "sample_index": item["sample_index"]
         } for item in scoring_results 
         if item["puzzle_id"] in solutions
     ]
@@ -69,14 +66,11 @@ def create_score_summary(solutions: dict[str, list[list[list[int]]]], scoring_re
     if missing_ids:
         missing_df = pd.DataFrame({
             "puzzle_id": missing_ids,
-            "submission_id": [None] * len(missing_ids),
             "score_for_attempts": [[]] * len(missing_ids),
-            "duration_minutes": [0] * len(missing_ids),
-            "sample_index": [None] * len(missing_ids)
         })
         score_df = pd.concat([score_df, missing_df], ignore_index=True)
     score_df["score"] = score_df["score_for_attempts"].apply(compute_score)
-    score_df = score_df.sort_values(by=["score", "duration_minutes"], ascending=[False, False])
+    score_df = score_df.sort_values(by=["score"], ascending=[False])
     logger.info(f"Score dataframe after computing score:\n{score_df.to_string()}")
     logger.info(f"Total score: {score_df['score'].sum()} / {len(score_df)}")
     score = score_df["score"].mean()
@@ -84,9 +78,7 @@ def create_score_summary(solutions: dict[str, list[list[list[int]]]], scoring_re
 
 async def score_submission(
     solutions_file: str,
-    output_folder: str,
-    submission_folder_relative: Optional[str],
-    submission_metadata_folder_relative: Optional[str],
+    submissions_file: str,
     num_attempts: int,
 ):
     logging.basicConfig(
@@ -94,61 +86,29 @@ async def score_submission(
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 
-    output_folder = Path(output_folder)
-    if not output_folder.is_absolute():
-        output_folder = Path.cwd() / output_folder
-
     logger.info(f"Loading solutions from {solutions_file}")
     solutions_file = Path(solutions_file)
     if not solutions_file.is_absolute():
         solutions_file = Path.cwd() / solutions_file
     solutions = json.loads(read_file(solutions_file))
 
+    logger.info(f"Loading submissions from {submissions_file}")
+    submissions_file = Path(submissions_file)
+    if not submissions_file.is_absolute():
+        submissions_file = Path.cwd() / submissions_file
+    submissions = json.loads(read_file(submissions_file))
+
     scoring_results = []
-    for subfolder in output_folder.iterdir():
-        if not subfolder.is_dir():
-            continue
-
-        metadata_file = subfolder / "metadata.json"
-        duration_seconds = 0
-        if metadata_file.exists():
-            metadata = EvaluationMetadata.from_dict(json.loads(read_file(metadata_file)))
-            if metadata.status not in [EvaluationStatus.SUCCESS, EvaluationStatus.TIMEOUT]:
-                continue
-            if metadata.duration_seconds is not None:
-                duration_seconds = metadata.duration_seconds
-
-        if submission_folder_relative is not None:
-            puzzle_submission_file = subfolder / submission_folder_relative / "submission.json"
-        else:
-            puzzle_submission_file = subfolder / "submission.json"
-        if not puzzle_submission_file.exists():
-            continue
-        puzzle_submission = json.loads(read_file(puzzle_submission_file))
-        assert len(puzzle_submission) == 1, "Only one puzzle submission is supported"
-        puzzle_id = list(puzzle_submission.keys())[0]
-        if puzzle_id not in solutions:
-            logger.warning(f"Puzzle {puzzle_id} not found in solutions file")
-            continue
+    for puzzle_id, submission_data in submissions.items():
         score_for_attempts = score_puzzle_submission(
             solutions=solutions[puzzle_id], 
-            submission=puzzle_submission[puzzle_id],
+            submission=submission_data,
             num_attempts=num_attempts
         )
-
-        sample_index = None  # Default value when submission_folder_relative is not provided
-        if submission_metadata_folder_relative is not None:
-            submission_metadata_file = subfolder / submission_metadata_folder_relative / "metadata.json"
-            if submission_metadata_file.exists():
-                submission_metadata = json.loads(read_file(submission_metadata_file))
-                sample_index = submission_metadata["sample_index"]
 
         scoring_results.append(
             {
                 "puzzle_id": puzzle_id, 
-                "submission_id": subfolder.name, 
-                "duration_seconds": duration_seconds,
-                "sample_index": sample_index,
                 "score_for_attempts": score_for_attempts,
             }
         )
@@ -167,23 +127,10 @@ def parse_arguments():
         help="Path to the solutions JSON file in ARC Prize format",
     )
     parser.add_argument(
-        "-o",
-        "--output_folder",
+        "--submissions_file",
         type=str,
         required=True,
-        help="Path to the output folder created by the evaluation script",
-    )
-    parser.add_argument(
-        "-s",
-        "--submission_folder_relative",
-        type=str,
-        help="Relative path of the folder (with respect to the solver's output folder root) containing the submission.json file. Set this to 'submission/core' to score the core system. Not required for extended system or plain COT solvers.",
-    )
-    parser.add_argument(
-        "-m",
-        "--submission_metadata_folder_relative",
-        type=str,
-        help="Relative path of the folder (with respect to the solver's output folder root) containing the submission metadata file with sample index information. 'submission/extended' or 'submission/core'. Not required for plain COT solvers.",
+        help="Path to the submissions JSON file",
     )
     parser.add_argument(
         "-n",
@@ -203,9 +150,7 @@ def main_cli():
     asyncio.run(
         score_submission(
             solutions_file=args.solutions_file,
-            output_folder=args.output_folder,
-            submission_folder_relative=args.submission_folder_relative,
-            submission_metadata_folder_relative=args.submission_metadata_folder_relative,
+            submissions_file=args.submissions_file,
             num_attempts=args.num_attempts,
         )
     )

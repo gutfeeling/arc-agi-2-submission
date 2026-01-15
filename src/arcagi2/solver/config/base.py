@@ -12,7 +12,6 @@ from arcagi2.utils.utils import SerializableDataclassMixin
 
 
 PROMPTS_FOLDER = Path(__file__).absolute().parents[1] / "prompts"
-CODE_TEMPLATES_FOLDER = Path(__file__).absolute().parents[1] / "code_templates"
 
 IPYBOX_SANDBOX_CLS = IPyBoxSandbox
 IPYBOX_SANDBOX_KWARGS = {"tag": "ipybox:solver"}
@@ -44,7 +43,7 @@ DAYTONA_SANDBOX_KWARGS = {
 
 @dataclass
 class SolverConfig(SerializableDataclassMixin):
-    num_samples: int = 5
+    call_config: AbstractAPIClient.CallConfig
 
     # For avoidable model failures and avoidable sandbox bugs
     max_retries: int = 2
@@ -63,11 +62,7 @@ class SolverConfig(SerializableDataclassMixin):
 class InterleavedThinkingConfig(SolverConfig):
     sandbox_cls: Type[Sandbox]
     sandbox_kwargs: dict
-    interleaved_thinking_solver: AbstractAPIClient.CallConfig
-    soft_verifier: AbstractAPIClient.CallConfig
-    generalizer: AbstractAPIClient.CallConfig
 
 @dataclass(kw_only=True)
 class BaselineConfig(SolverConfig):
     use_tools: bool = False
-    plain_cot_solver: AbstractAPIClient.CallConfig

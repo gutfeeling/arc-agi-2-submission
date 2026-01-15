@@ -1,12 +1,9 @@
 import asyncio
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from arcagi2.evaluation.utils import EvaluationMetadata, EvaluationStatus
-from arcagi2.solver.solver import SolverStatus
-from arcagi2.utils.utils import read_file
+from arcagi2.evaluation.utils import PuzzleStatus
 
 
 def format_duration(seconds: Optional[float]) -> str:
@@ -18,157 +15,69 @@ def format_duration(seconds: Optional[float]) -> str:
     return f"{minutes}m {secs:02d}s"
 
 
-def format_time(dt: datetime) -> str:
-    """Format datetime to HH:MM:SS."""
-    return dt.strftime("%H:%M:%S")
-
-
 class StatusDashboard:
-    """Dashboard that prints full status on state changes only."""
+    """Dashboard that prints status on sample count changes per puzzle."""
     
     def __init__(
         self,
         output_folder: Path,
-        total_puzzles: int,
+        task_data: list[tuple[str, dict]],  # List of (puzzle_id, puzzle_json) tuples
+        num_samples: int,
         eval_start_time: datetime,
         resume: bool,
+        file_lock: asyncio.Lock,
         poll_interval: float = 5,
         max_rows: int = 5,    # Max rows to show per section before "+ N more"
     ):
         self.output_folder = output_folder
-        self.total_puzzles = total_puzzles
+        self.task_data = task_data
+        self.puzzle_ids = list(dict.fromkeys(puzzle_id for puzzle_id, _ in task_data))  # Unique puzzle IDs, preserving order
+        self.total_tasks = len(task_data)
+        self.num_samples = num_samples
         self.eval_start_time = eval_start_time
+        self.file_lock = file_lock
         self.poll_interval = poll_interval
         self.max_rows = max_rows
         
-        # Track previous state to detect changes
-        # Key: submission_id, Value: (status, solver_status)
-        self._prev_state: dict[str, tuple[EvaluationStatus, SolverStatus]] = {}
+        # Track previous sample counts per puzzle to detect changes
+        self._prev_sample_counts: dict[str, int] = {}
         
         # If resuming, capture existing dirs to exclude from tracking
         self._exclude_dirs: set[str] = set()
         if resume and output_folder.exists():
             self._exclude_dirs = {d.name for d in output_folder.iterdir() if d.is_dir()}
 
-    def _scan_status(self) -> dict[str, tuple[EvaluationMetadata, SolverStatus]]:
-        """Scan output folder and return current state of all items."""
-        items = {}
+    def _get_num_samples_for_puzzle(self, puzzle_id: str) -> int:
+        """Get the number of samples for a specific puzzle from task_data."""
+        return sum(1 for pid, _ in self.task_data if pid == puzzle_id)
 
-        if not self.output_folder.exists():
-            return items
-
-        for subfolder in self.output_folder.iterdir():
-            if not subfolder.is_dir():
-                continue
-            if subfolder.name in self._exclude_dirs:
-                continue
-            metadata_file = subfolder / "metadata.json"
-            if not metadata_file.exists():
-                continue
-            try:
-                data = json.loads(read_file(metadata_file))
-                metadata = EvaluationMetadata.from_dict(data)
-                solver_status = SolverStatus.from_output_folder(subfolder)
-                items[metadata.submission_id] = (metadata, solver_status)
-            except Exception:
-                continue
-
-        return items
-
-    def _get_changes(self, current_state: dict[str, tuple[EvaluationMetadata, SolverStatus]]) -> list[str]:
-        """Get list of change descriptions."""
-        changes = []
-        for submission_id, (metadata, solver_status) in current_state.items():
-            prev = self._prev_state.get(submission_id)
-            if prev is None:
-                changes.append(f"started: puzzle {metadata.puzzle_id}")
-            else:
-                prev_status, prev_solver_status = prev
-                if metadata.status != prev_status:
-                    changes.append(f"{metadata.status.value}: puzzle {metadata.puzzle_id}")
-                elif solver_status.sample_num != prev_solver_status.sample_num:
-                    changes.append(f"sample {solver_status.sample_num}: puzzle {metadata.puzzle_id}")
-                elif solver_status.stage != prev_solver_status.stage:
-                    changes.append(f"{solver_status.stage}: puzzle {metadata.puzzle_id}")
-        return changes
-
-    def _update_prev_state(self, current_state: dict[str, tuple[EvaluationMetadata, SolverStatus]]):
-        """Update the previous state tracking."""
-        for submission_id, (metadata, solver_status) in current_state.items():
-            self._prev_state[submission_id] = (metadata.status, solver_status)
-
-    # Formatting helpers for _build_display
-
-    @staticmethod
-    def _format_item_prefix(metadata: EvaluationMetadata) -> str:
-        return (
-            f"  {metadata.submission_id} / puzzle {metadata.puzzle_id} | "
-            f"started {format_time(metadata.start_time)}"
-        )
-
-    @staticmethod
-    def _format_finished_item(metadata: EvaluationMetadata, _: SolverStatus) -> str:
-        return f"{StatusDashboard._format_item_prefix(metadata)} | duration {format_duration(metadata.duration_seconds)}"
-
-    @staticmethod
-    def _format_running_item(metadata: EvaluationMetadata, solver_status: SolverStatus, now: datetime) -> str:
-        elapsed_running = (now - metadata.start_time).total_seconds()
-        if solver_status.sample_num is not None:
-            status_str = f"sample {solver_status.sample_num} / {solver_status.stage}"
-        else:
-            status_str = "starting"
-        return f"{StatusDashboard._format_item_prefix(metadata)} | elapsed {format_duration(elapsed_running)} | {status_str}"
-
-    def _build_section(self, name: str, items: list, formatter) -> list[str]:
-        """Build a section of the display, returns list of lines."""
-        if not items:
-            return []
-        lines = ["", f"{name} ({len(items)}):"]
-        for item in items[:self.max_rows]:
-            lines.append(formatter(*item))
-        if len(items) > self.max_rows:
-            lines.append(f"  + {len(items) - self.max_rows} more")
-        return lines
-
-    def _build_display(self, current_state: dict[str, tuple[EvaluationMetadata, SolverStatus]], changes: list[str]) -> str:
+    def _build_display(self, status_by_puzzle: dict[str, PuzzleStatus], changes: list[str]) -> str:
         """Build the full dashboard display string."""
         now = datetime.now()
         elapsed = (now - self.eval_start_time).total_seconds()
         
-        # Categorize items
-        errored = []
-        timeout = []
-        running = []
-        success = []
+        # Categorize puzzles
+        running_puzzles = []    # Puzzles with running samples
+        successful_puzzles = [] # Puzzles with all samples successful
+        errored_puzzles = []    # Puzzles with errored submissions
+
+        completed = 0
         
-        for submission_id, (metadata, solver_status) in current_state.items():
-            item = (metadata, solver_status)
-            if metadata.status == EvaluationStatus.ERROR:
-                errored.append(item)
-            elif metadata.status == EvaluationStatus.TIMEOUT:
-                timeout.append(item)
-            elif metadata.status == EvaluationStatus.RUNNING:
-                running.append(item)
-            elif metadata.status == EvaluationStatus.SUCCESS:
-                success.append(item)
-        
-        # Sort by start_time
-        errored.sort(key=lambda x: x[0].start_time)
-        timeout.sort(key=lambda x: x[0].start_time)
-        running.sort(key=lambda x: x[0].start_time)
-        success.sort(key=lambda x: x[0].start_time)
-        
-        # Calculate stats
-        finished = errored + timeout + success
-        total_duration = sum(
-            m.duration_seconds for m, _ in finished 
-            if m.duration_seconds is not None
-        )
-        avg_time = total_duration / len(finished) if len(finished) > 0 else 0
+        for puzzle_id, ps in status_by_puzzle.items():
+            num_samples = self._get_num_samples_for_puzzle(puzzle_id)
+
+            if len(ps.success) == num_samples:
+                successful_puzzles.append(ps)
+            if len(ps.error) > 0:
+                errored_puzzles.append(ps)
+            if len(ps.running) > 0:
+                running_puzzles.append(ps)
+
+            completed += len(ps.success) + len(ps.error)
         
         lines = []
         
-        # Print changes (limited)
+        # Changes section
         lines.append("─" * 80)
         if len(changes) <= self.max_rows:
             lines.append(f"Changes: {', '.join(changes)}")
@@ -176,33 +85,88 @@ class StatusDashboard:
             lines.append(f"Changes: {', '.join(changes[:self.max_rows])} + {len(changes) - self.max_rows} more")
         lines.append("─" * 80)
         
+        # Status line
         lines.append(f"Output: {self.output_folder}")
         lines.append(
-            f"Time: {format_time(now)} | "
-            f"Finished: {len(finished)}/{self.total_puzzles} | "
-            f"Running: {len(running)} | "
-            f"Avg: {format_duration(avg_time)} | "
+            f"Time: {now.strftime('%H:%M:%S')} | "
+            f"Completed: {completed}/{self.total_tasks} | "
+            f"Running: {len(running_puzzles)} | "
             f"Elapsed: {format_duration(elapsed)}"
         )
         
-        lines.extend(self._build_section("Errored", errored, self._format_finished_item))
-        lines.extend(self._build_section("Timeout", timeout, self._format_finished_item))
-        lines.extend(self._build_section("Running", running, lambda m, s: self._format_running_item(m, s, now)))
-        lines.extend(self._build_section("Success", success, self._format_finished_item))
+        # Running section
+        if running_puzzles:
+            lines.append("")
+            lines.append(f"Running ({len(running_puzzles)}):")
+            for ps in running_puzzles[:self.max_rows]:
+                num_samples = self._get_num_samples_for_puzzle(ps.puzzle_id)
+                all_subs = ps.success + ps.running
+                earliest_start = min(m.start_time for m in all_subs)
+                puzzle_elapsed = (now - earliest_start).total_seconds()
+                
+                sample_progress = f"{len(ps.success) + len(ps.running)}/{num_samples}"
+                done_ids = ", ".join(m.submission_id for m in ps.success) if ps.success else "none"
+                running_ids = ", ".join(m.submission_id for m in ps.running) if ps.running else "none"
+                
+                lines.append(
+                    f"  puzzle {ps.puzzle_id} | elapsed {format_duration(puzzle_elapsed)} | "
+                    f"sample {sample_progress} | samples done: {done_ids} | samples running: {running_ids}"
+                )
+            if len(running_puzzles) > self.max_rows:
+                lines.append(f"  + {len(running_puzzles) - self.max_rows} more")
+        
+        # Successful section
+        if successful_puzzles:
+            lines.append("")
+            lines.append(f"Successful ({len(successful_puzzles)}):")
+            for ps in successful_puzzles[:self.max_rows]:
+                num_samples = self._get_num_samples_for_puzzle(ps.puzzle_id)
+                submission_ids = ", ".join(m.submission_id for m in ps.success)
+                lines.append(
+                    f"  puzzle {ps.puzzle_id} | sample {len(ps.success)}/{num_samples} | "
+                    f"samples: {submission_ids}"
+                )
+            if len(successful_puzzles) > self.max_rows:
+                lines.append(f"  + {len(successful_puzzles) - self.max_rows} more")
+        
+        # Errored section
+        if errored_puzzles:
+            lines.append("")
+            lines.append(f"Errored ({len(errored_puzzles)}):")
+            for ps in errored_puzzles[:self.max_rows]:
+                errored_ids = ", ".join(m.submission_id for m in ps.error)
+                lines.append(f"  puzzle {ps.puzzle_id} | errored: {errored_ids}")
+            if len(errored_puzzles) > self.max_rows:
+                lines.append(f"  + {len(errored_puzzles) - self.max_rows} more")
         
         lines.append("═" * 80)
         return "\n".join(lines)
 
+    def _compute_changes(self, current_counts: dict[str, int]) -> list[str]:
+        """Compute list of change descriptions from previous to current counts."""
+        changes = []
+        for puzzle_id, count in current_counts.items():
+            prev_count = self._prev_sample_counts.get(puzzle_id, 0)
+            if count != prev_count:
+                num_samples = self._get_num_samples_for_puzzle(puzzle_id)
+                changes.append(f"puzzle {puzzle_id}: {count}/{num_samples}")
+        return changes
+
     def update(self):
-        """Scan status and print display if there are changes."""
+        """Scan status and print display if sample counts have changed."""
         try:
-            current_state = self._scan_status()
-            changes = self._get_changes(current_state)
+            status_by_puzzle = PuzzleStatus.scan(self.output_folder, exclude_dirs=self._exclude_dirs)
+            current_counts = {
+                puzzle_id: status_by_puzzle[puzzle_id].count_samples(count_errored_samples=True)
+                for puzzle_id in self.puzzle_ids
+                if puzzle_id in status_by_puzzle
+            }
             
-            if changes:
-                print(self._build_display(current_state, changes))
+            if current_counts != self._prev_sample_counts:
+                changes = self._compute_changes(current_counts)
+                print(self._build_display(status_by_puzzle, changes))
                 print()
-                self._update_prev_state(current_state)
+                self._prev_sample_counts = current_counts
         except Exception as e:
             print(f"[Dashboard error: {e}]")
 
@@ -210,7 +174,8 @@ class StatusDashboard:
         """Run the dashboard polling loop. Cancel the task to stop."""
         print(f"Polling for status changes every {self.poll_interval} seconds...")
         while True:
-            self.update()
+            async with self.file_lock:
+                await asyncio.to_thread(self.update)  # Run in thread pool to avoid blocking event loop
             await asyncio.sleep(self.poll_interval)
 
     def print_error(self, error: Exception):

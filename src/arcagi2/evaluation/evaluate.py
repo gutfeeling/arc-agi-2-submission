@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from arcagi2.api.clients import AbstractAPIClient
 from arcagi2.evaluation.dashboard import StatusDashboard
-from arcagi2.evaluation.utils import EvaluationMetadata, EvaluationStatus
+from arcagi2.evaluation.utils import SampleMetadata, SampleStatus, PuzzleStatus, choose_best_output_grids
 from arcagi2.solver.config import SOLVER_CONFIGS
 from arcagi2.solver.solver import solver
 from arcagi2.utils.logging_utils import setup_infra_logger_console_handler
@@ -27,10 +27,12 @@ async def evaluate(
     config_name: str,
     output_folder: str,  
     vllm_base_url: Optional[str],
+    num_samples: int,
     parallel: int,
     submission_folder: str,
-    puzzle_timeout_minutes: int,
+    timeout_minutes: float,
     resume: bool,
+    repeat_errored_samples: bool,
     env_file: Optional[str] = None,    # allowing None because it's cumbersome to use dotenv in Kaggle. It's easier to just set os.environ directly from data in User Secrets.
 ) -> None:
 
@@ -93,41 +95,40 @@ async def evaluate(
         challenge_file = Path.cwd() / challenge_file
 
     challenge = json.loads(read_file(challenge_file))
-    if resume:
-        done = []
-        for subfolder in output_folder.iterdir():
-            if not subfolder.is_dir():
-                continue
-            metadata_file = subfolder / "metadata.json"
-            if not metadata_file.exists():
-                continue
-            metadata = EvaluationMetadata.from_dict(
-                json.loads(read_file(metadata_file))
-            )
-            if metadata.status in [EvaluationStatus.SUCCESS, EvaluationStatus.TIMEOUT]:
-                done.append(metadata.puzzle_id)
-        challenge = {
-            puzzle_id: puzzle_json 
-            for puzzle_id, puzzle_json in challenge.items() 
-            if puzzle_id not in done
-        }
-    logger.info(f"Loaded {len(challenge)} puzzles for evaluation")
+    count_errored_samples = not repeat_errored_samples
+    
+    if not resume:
+        task_data = [(puzzle_id, puzzle_json) for puzzle_id, puzzle_json in challenge.items()] * num_samples
+    else:
+        status_by_puzzle = PuzzleStatus.scan(output_folder)
+        task_data = []
+        for repetition in range(num_samples):
+            tasks_for_repetition = []
+            for puzzle_id, puzzle_json in challenge.items():
+                ps = status_by_puzzle.get(puzzle_id)
+                sample_count = ps.count_samples(count_errored_samples=count_errored_samples) if ps is not None else 0
+                if sample_count >= repetition + 1:
+                    continue
+                tasks_for_repetition.append((puzzle_id, puzzle_json))
+            task_data.extend(tasks_for_repetition)
 
-    total_puzzles = len(challenge)
+    logger.info(f"Loaded {len(task_data)} task data for evaluation")
 
-    logger.info(f"Processing {total_puzzles} puzzles with max concurrency of {parallel}")
+    logger.info(f"Processing {len(task_data)} task data with max concurrency of {parallel}")
 
     # Create semaphore to control concurrency
     semaphore = asyncio.Semaphore(parallel)
-    submission_write_lock = asyncio.Lock()
+    file_lock = asyncio.Lock()  # Shared lock for metadata reads/writes between workers and dashboard and for updating final submission
 
     # Start the live dashboard
     eval_start_time = datetime.now()
     dashboard = StatusDashboard(
         output_folder=output_folder,
-        total_puzzles=total_puzzles,
+        task_data=task_data,
+        num_samples=num_samples,
         eval_start_time=eval_start_time,
         resume=resume,
+        file_lock=file_lock,
         # Following params are hardcoded to sane values. If we need to change them, they can also become an argument of `evaluate` later.
         poll_interval=10,
         max_rows=10,
@@ -143,84 +144,66 @@ async def evaluate(
             item_folder.mkdir(parents=True, exist_ok=False)
             
             start_time = datetime.now()
-            metadata = EvaluationMetadata(
+            metadata = SampleMetadata(
                 submission_id=submission_id,
                 puzzle_id=puzzle_id,
                 start_time=start_time,
                 end_time=None,
                 duration_seconds=None,
-                status=EvaluationStatus.RUNNING,
+                status=SampleStatus.RUNNING,
             )
             logger.info(f"Starting submission {submission_id} for puzzle {puzzle_id}")
-            save_json(metadata.to_dict(), item_folder / "metadata.json")
+            async with file_lock:
+                save_json(metadata.to_dict(), item_folder / "metadata.json")
             
             try:
-                await asyncio.wait_for(
-                    solver(
-                        config=config,
-                        puzzle_id=puzzle_id,
-                        puzzle_json=puzzle_json,
-                        output_folder=item_folder,
-                    ),
-                    timeout=puzzle_timeout_minutes * 60
-                )    # This will create a submission.json file in the output folder if not timed out
+                await solver(
+                    config=config,
+                    puzzle_id=puzzle_id,
+                    puzzle_json=puzzle_json,
+                    output_folder=item_folder,
+                )    # This will create a submission.json file in the output folder
                 # Update submission file with new puzzle submission
-                puzzle_submission_file = item_folder / "submission.json"
-                if puzzle_submission_file.exists():
-                    puzzle_submission = json.loads(read_file(puzzle_submission_file))
-                    async with submission_write_lock:
-                        current_submission = json.loads(read_file(submission_file))
-                        save_json(
-                            {**current_submission, **puzzle_submission}, 
-                            submission_file
-                        )
                 # Success
                 metadata.end_time = datetime.now()
                 metadata.duration_seconds = (metadata.end_time - start_time).total_seconds()
-                metadata.status = EvaluationStatus.SUCCESS
-                save_json(metadata.to_dict(), item_folder / "metadata.json")
+                metadata.status = SampleStatus.SUCCESS
+                async with file_lock:
+                    save_json(metadata.to_dict(), item_folder / "metadata.json")
+                    majority_voted_submission = choose_best_output_grids(
+                        puzzle_id=puzzle_id,
+                        puzzle_json=puzzle_json,
+                        output_folder=output_folder,
+                    )
+                    current_submission = json.loads(read_file(submission_file))
+                    save_json(
+                        {**current_submission, **majority_voted_submission},
+                        submission_file
+                    )
                 logger.info(f"Submission {submission_id} for puzzle {puzzle_id} completed in {metadata.duration_seconds / 60:.2f} minutes")
-
-            except asyncio.TimeoutError:
-                metadata.end_time = datetime.now()
-                metadata.duration_seconds = (metadata.end_time - start_time).total_seconds()
-                metadata.status = EvaluationStatus.TIMEOUT
-                save_json(metadata.to_dict(), item_folder / "metadata.json")
-                logger.warning(f"Submission {submission_id} timed out after {puzzle_timeout_minutes} minutes")
 
             except Exception as e:
                 metadata.end_time = datetime.now()
                 metadata.duration_seconds = (metadata.end_time - start_time).total_seconds()
-                metadata.status = EvaluationStatus.ERROR
-                save_json(metadata.to_dict(), item_folder / "metadata.json")
+                metadata.status = SampleStatus.ERROR
+                async with file_lock:
+                    save_json(metadata.to_dict(), item_folder / "metadata.json")
                 logger.exception(f"Submission {submission_id} failed due to exception: {e}")
 
     tasks = [
-        asyncio.create_task(worker(puzzle_id, puzzle_json)) for puzzle_id, puzzle_json in challenge.items()
+        asyncio.create_task(worker(puzzle_id, puzzle_json)) for puzzle_id, puzzle_json in task_data
     ]
 
     logger.info("Starting processing...")
     try:
-        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        async with asyncio.timeout(timeout_minutes * 60):
+            await asyncio.gather(*tasks)
         
-        logger.info("Either all tasks completed or an exception was detected. We will try to exit.")
-        for t in tasks:
-            t.cancel()
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Check if any task raised an exception
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Exception detected: {result}. All tasks have been cancelled.")
-                raise result
-        
-        logger.info(
-            f"Processing complete! {total_puzzles} puzzles processed"
-        )
+        logger.info(f"Processing complete! {len(task_data)} tasks processed")
         logger.info("Evaluation completed successfully")
         dashboard.update()
     except Exception as e:
+        logger.exception("Evaluation failed")
         dashboard.print_error(e)
         raise
     finally:
@@ -266,21 +249,32 @@ def parse_arguments() -> argparse.Namespace:
         help="Folder to save submission.json"
     )
     parser.add_argument(
+        "-n", "--num_samples",
+        type=int,
+        required=True,
+        help="Number of samples to draw for each puzzle"
+    )
+    parser.add_argument(
         "-p", "--parallel",
         type=int,
         required=True,
         help="Number of puzzles to process in parallel. Set to 1 for sequential processing (default). Higher values increase parallelism."
     )
     parser.add_argument(
-        "-t", "--puzzle_timeout_minutes",
-        type=int,
-        required=True,
-        help="Timeout in minutes for each puzzle"
+        "-t", "--timeout_minutes",
+        type=float,
+        default=float("inf"),
+        help="Timeout for the whole evaluation in minutes"
     )
     parser.add_argument(
         "-r", "--resume",
         action="store_true",
-        help="Resume from where we left off. If a puzzle's output folder doesn't have a submission.json, then it means that it didn't finish, so we should retry it."
+        help="Resume from where we left off."
+    )
+    parser.add_argument(
+        "--repeat-errored-samples",
+        action="store_true",
+        help="If a previous sample errored, don't count that as a valid sample. Only relevant if evalution is resumed."
     )
     parser.add_argument(
         "-e", "--env_file",
@@ -301,10 +295,12 @@ def main_cli() -> None:
             config_name=args.config_name,
             output_folder=args.output_folder,
             vllm_base_url=args.vllm_base_url,
+            num_samples=args.num_samples,
             parallel=args.parallel,
             submission_folder=args.submission_folder,
-            puzzle_timeout_minutes=args.puzzle_timeout_minutes,
+            timeout_minutes=args.timeout_minutes,
             resume=args.resume,
+            repeat_errored_samples=args.repeat_errored_samples,
             env_file=args.env_file,
         )
     )
