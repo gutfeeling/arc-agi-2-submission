@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 def score_puzzle_submission(
         solutions: list[list[list[int]]], 
         submission: list[dict], 
+        num_attempts: int,
         ) -> list[list[int]]:
     """
     Score a puzzle submission against the expected outputs.
@@ -31,10 +32,14 @@ def score_puzzle_submission(
     """
     scores = []
     for test_idx, attempts in enumerate(submission):
-        expected_output = solutions[test_idx]
+        try:
+            expected_output = solutions[test_idx]
+        except IndexError:
+            logger.exception(f"IndexError: {test_idx} not found in solutions")
+            continue
         attempt_scores = [
-            1 if attempts.get("attempt_1") == expected_output else 0,
-            1 if attempts.get("attempt_2") == expected_output else 0,
+            1 if attempts.get(f"attempt_{num + 1}") == expected_output else 0
+            for num in range(num_attempts)
         ]
         scores.append(attempt_scores)
     return scores
@@ -82,6 +87,7 @@ async def score_submission(
     output_folder: str,
     submission_folder_relative: Optional[str],
     submission_metadata_folder_relative: Optional[str],
+    num_attempts: int,
 ):
     logging.basicConfig(
         level=logging.INFO,
@@ -124,7 +130,11 @@ async def score_submission(
         if puzzle_id not in solutions:
             logger.warning(f"Puzzle {puzzle_id} not found in solutions file")
             continue
-        score_for_attempts = score_puzzle_submission(solutions[puzzle_id], puzzle_submission[puzzle_id])
+        score_for_attempts = score_puzzle_submission(
+            solutions=solutions[puzzle_id], 
+            submission=puzzle_submission[puzzle_id],
+            num_attempts=num_attempts
+        )
 
         sample_index = None  # Default value when submission_folder_relative is not provided
         if submission_metadata_folder_relative is not None:
@@ -175,6 +185,14 @@ def parse_arguments():
         type=str,
         help="Relative path of the folder (with respect to the solver's output folder root) containing the submission metadata file with sample index information. 'submission/extended' or 'submission/core'. Not required for plain COT solvers.",
     )
+    parser.add_argument(
+        "-n",
+        "--num_attempts",
+        type=int,
+        choices=[1, 2],
+        default=2,
+        help="Number of attempts to score. 1 for single attempt, 2 for two attempts.",
+    )
     args = parser.parse_args()
 
     return args
@@ -188,6 +206,7 @@ def main_cli():
             output_folder=args.output_folder,
             submission_folder_relative=args.submission_folder_relative,
             submission_metadata_folder_relative=args.submission_metadata_folder_relative,
+            num_attempts=args.num_attempts,
         )
     )
 
