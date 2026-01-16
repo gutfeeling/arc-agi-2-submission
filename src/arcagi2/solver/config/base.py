@@ -15,7 +15,7 @@ PROMPTS_FOLDER = Path(__file__).absolute().parents[1] / "prompts"
 CODE_TEMPLATES_FOLDER = Path(__file__).absolute().parents[1] / "code_templates"
 
 IPYBOX_SANDBOX_CLS = IPyBoxSandbox
-IPYBOX_SANDBOX_KWARGS = {"tag": "ipybox:solver"}
+IPYBOX_SANDBOX_KWARGS = {"tag": "ipybox:solver"} # "localhost/ipybox:solver" if using podman
 
 DAYTONA_SANDBOX_CLS = DaytonaSandbox
 DAYTONA_SANDBOX_KWARGS = {
