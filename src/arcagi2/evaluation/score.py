@@ -100,6 +100,9 @@ async def score_submission(
 
     scoring_results = []
     for puzzle_id, submission_data in submissions.items():
+        if puzzle_id not in solutions:
+            logger.warning(f"Puzzle {puzzle_id} not found in solutions")
+            continue
         score_for_attempts = score_puzzle_submission(
             solutions=solutions[puzzle_id], 
             submission=submission_data,
