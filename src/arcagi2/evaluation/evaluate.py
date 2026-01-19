@@ -372,7 +372,7 @@ async def evaluate(
                 metadata_file = subfolder / "metadata.json"
                 if not metadata_file.exists():
                     continue
-                metadata = PuzzleMetadata.from_dict(
+                metadata = Metadata.from_dict(
                     json.loads(read_file(metadata_file))
                 )
                 if metadata.status == EvaluationStatus.SUCCESS:
