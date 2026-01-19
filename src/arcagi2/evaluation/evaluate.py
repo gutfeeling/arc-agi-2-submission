@@ -49,6 +49,7 @@ def get_majority_voted_submission(
     """
     submission = [{"attempt_1": None, "attempt_2": None} for _ in range(len(puzzle_json["test"]))]
     stop = True
+    logger.info(f"Majority voting info for puzzle {puzzle_id}: num_results={len(results)}")
     for test_index in range(len(puzzle_json["test"])):
         excluded = None
         attempt_1_outputs = [
@@ -69,12 +70,32 @@ def get_majority_voted_submission(
         ]
         all_other_outputs = [grid for grid in attempt_1_outputs + attempt_2_outputs if grid != excluded]
         sorted_all_other_outputs = sort_by_majority(all_other_outputs)
+        
+        # Build ordered list of unique grids for logging (before popping)
+        unique_grids = []
+        if excluded is not None:
+            unique_grids.append(excluded)
+        unique_grids.extend([grid for grid, _ in sorted_all_other_outputs])
+        
         for attempt_idx in range(2):
             if submission[test_index][f"attempt_{attempt_idx + 1}"] is None:
                 try:
                     submission[test_index][f"attempt_{attempt_idx + 1}"] = sorted_all_other_outputs.pop(0)[0]
                 except IndexError:
                     pass
+        
+        # For each grid, find which results contributed and with which attempt
+        grid_contributions = {}
+        for grid_idx, grid in enumerate(unique_grids):
+            contributions = []
+            for result_idx, result in enumerate(results):
+                if result[puzzle_id][test_index]["attempt_1"] == grid:
+                    contributions.append((result_idx, "attempt_1"))
+                if result[puzzle_id][test_index]["attempt_2"] == grid:
+                    contributions.append((result_idx, "attempt_2"))
+            grid_contributions[grid_idx] = contributions
+        logger.info(f"Majority voting info for puzzle {puzzle_id} test {test_index}: {grid_contributions}")
+    logger.info(f"Majority voting info for puzzle {puzzle_id}: early stopping decision={stop}")
     return MajorityVoteResult(
         submission={puzzle_id: submission}, 
         stop=stop
