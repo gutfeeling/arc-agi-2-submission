@@ -1,19 +1,18 @@
 from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 class EvaluationStatus(Enum):
     RUNNING = "running"
     SUCCESS = "success"
-    TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
     ERROR = "error"
 
-
 @dataclass
-class EvaluationMetadata:
-    submission_id: str
+class Metadata:
+    uid: str
     puzzle_id: str
     start_time: datetime
     end_time: Optional[datetime]
@@ -22,7 +21,7 @@ class EvaluationMetadata:
 
     def to_dict(self) -> dict:
         return {
-            "submission_id": self.submission_id,
+            "uid": self.uid,
             "puzzle_id": self.puzzle_id,
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,
@@ -31,12 +30,26 @@ class EvaluationMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "EvaluationMetadata":
+    def from_dict(cls, data: dict) -> "Metadata":
         return cls(
-            submission_id=data["submission_id"],
+            uid=data["uid"],
             puzzle_id=data["puzzle_id"],
             start_time=datetime.fromisoformat(data["start_time"]),
             end_time=datetime.fromisoformat(data["end_time"]) if data["end_time"] is not None else None,
             duration_seconds=data["duration_seconds"],
             status=EvaluationStatus(data["status"]),
         )
+
+@dataclass
+class PuzzleMetadata(Metadata):
+    num_samples: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        return {**super().to_dict(), "num_samples": self.num_samples}
+
+def sort_by_majority(outputs: list[Any]) -> list[tuple[Any, int]]:
+    result = []
+    for output in outputs:
+        if output not in [x[0] for x in result]:
+            result.append([output, outputs.count(output)])
+    return sorted(result, key=lambda x: x[1], reverse=True)

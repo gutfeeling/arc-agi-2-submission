@@ -44,8 +44,6 @@ DAYTONA_SANDBOX_KWARGS = {
 
 @dataclass
 class SolverConfig(SerializableDataclassMixin):
-    num_samples: int = 5
-
     # For avoidable model failures and avoidable sandbox bugs
     max_retries: int = 2
 
@@ -63,6 +61,7 @@ class SolverConfig(SerializableDataclassMixin):
 class InterleavedThinkingConfig(SolverConfig):
     sandbox_cls: Type[Sandbox]
     sandbox_kwargs: dict
+    num_samples: int = 5
     interleaved_thinking_solver: AbstractAPIClient.CallConfig
     soft_verifier: AbstractAPIClient.CallConfig
     generalizer: AbstractAPIClient.CallConfig
