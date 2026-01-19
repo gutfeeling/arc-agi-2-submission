@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from arcagi2.api.clients import AbstractAPIClient
 from arcagi2.evaluation.dashboard import StatusDashboard
-from arcagi2.evaluation.utils import Metadata, EvaluationStatus, PuzzleMetadata, sort_by_majority
+from arcagi2.evaluation.utils import Metadata, EvaluationStatus, sort_by_majority
 from arcagi2.solver.config import SOLVER_CONFIGS
 from arcagi2.solver.config.base import SolverConfig
 from arcagi2.solver.solver import solver
@@ -165,7 +165,7 @@ async def puzzle_worker(
     try:
         puzzle_output_folder = evaluation_output_folder / uid
         puzzle_output_folder.mkdir(parents=True, exist_ok=False)
-        puzzle_metadata = PuzzleMetadata(
+        metadata = Metadata(
             uid=uid,
             puzzle_id=puzzle_id,
             start_time=datetime.now(),
@@ -175,7 +175,7 @@ async def puzzle_worker(
         )
         async with lock:
             save_json(
-                puzzle_metadata.to_dict(), 
+                metadata.to_dict(), 
                 puzzle_output_folder / "metadata.json"
             )
 
@@ -228,23 +228,23 @@ async def puzzle_worker(
     except Exception:
         try:
             logger.exception(f"Error in puzzle worker for puzzle {puzzle_id} and UID {uid}")
-            puzzle_metadata.status = EvaluationStatus.ERROR
-            puzzle_metadata.end_time = datetime.now()
-            puzzle_metadata.duration_seconds = (puzzle_metadata.end_time - puzzle_metadata.start_time).total_seconds()
+            metadata.status = EvaluationStatus.ERROR
+            metadata.end_time = datetime.now()
+            metadata.duration_seconds = (metadata.end_time - metadata.start_time).total_seconds()
             async with lock:
                 save_json(
-                    puzzle_metadata.to_dict(), 
+                    metadata.to_dict(), 
                     puzzle_output_folder / "metadata.json"
                 )
         except Exception:
             logger.exception(f"Error in saving puzzle metadata for puzzle {puzzle_id} and UID {uid} after puzzle worker ran into an error")
     except asyncio.CancelledError:
         try:
-            puzzle_metadata.status = EvaluationStatus.CANCELLED
-            puzzle_metadata.end_time = datetime.now()
-            puzzle_metadata.duration_seconds = (puzzle_metadata.end_time - puzzle_metadata.start_time).total_seconds()
+            metadata.status = EvaluationStatus.CANCELLED
+            metadata.end_time = datetime.now()
+            metadata.duration_seconds = (metadata.end_time - metadata.start_time).total_seconds()
             save_json(
-                puzzle_metadata.to_dict(), 
+                metadata.to_dict(), 
                 puzzle_output_folder / "metadata.json"
             )
         except Exception:
@@ -253,13 +253,12 @@ async def puzzle_worker(
             raise
     else:
         try:
-            puzzle_metadata.status = EvaluationStatus.SUCCESS
-            puzzle_metadata.num_samples = num_finished_tasks
-            puzzle_metadata.end_time = datetime.now()
-            puzzle_metadata.duration_seconds = (puzzle_metadata.end_time - puzzle_metadata.start_time).total_seconds()
+            metadata.status = EvaluationStatus.SUCCESS
+            metadata.end_time = datetime.now()
+            metadata.duration_seconds = (metadata.end_time - metadata.start_time).total_seconds()
             async with lock:
                 save_json(
-                    puzzle_metadata.to_dict(), 
+                    metadata.to_dict(), 
                     puzzle_output_folder / "metadata.json"
                 )
         except Exception:
@@ -324,21 +323,16 @@ async def evaluate(
     elif not output_folder.exists() or not submission_file.exists():
         raise ValueError(f"Output folder {output_folder} or submission file {submission_file} does not exist. Not able to resume evaluation.")
 
-    stream_handler = None
     file_handler = None
     try:
         # Set up logging to file and console
         log_file = output_folder / "run.log"
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
         logger.addHandler(file_handler)
         logger.setLevel(logging.INFO)
 
-        logger.info(f"Logging to {log_file} and console")
         logger.info(f"Created output directory: {output_folder}")
         logger.info(f"Created submission file: {submission_file}")
 
@@ -423,8 +417,6 @@ async def evaluate(
             except asyncio.TimeoutError:
                 logger.warning("Timeout while waiting for tasks to finish gracefully. Exiting evaluation without completing cleanup.")
     finally:
-        if stream_handler is not None:
-            logger.removeHandler(stream_handler)
         if file_handler is not None:
             logger.removeHandler(file_handler)
             file_handler.close()

@@ -40,13 +40,6 @@ class Metadata:
             status=EvaluationStatus(data["status"]),
         )
 
-@dataclass
-class PuzzleMetadata(Metadata):
-    num_samples: Optional[int] = None
-
-    def to_dict(self) -> dict:
-        return {**super().to_dict(), "num_samples": self.num_samples}
-
 def sort_by_majority(outputs: list[Any]) -> list[tuple[Any, int]]:
     result = []
     for output in outputs:
