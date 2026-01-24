@@ -430,7 +430,6 @@ async def evaluate(
         except asyncio.TimeoutError:
             logger.info("Evaluation timed out.")
             dashboard.echo("Time's up. Finishing evaluation.")
-            raise
         except Exception as e:
             logger.exception("Evaluation failed.")
             dashboard.echo(f"Error: {e}.\nAll tasks have been cancelled. Evaluation failed.")
