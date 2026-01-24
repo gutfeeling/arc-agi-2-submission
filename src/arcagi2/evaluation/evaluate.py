@@ -1,6 +1,6 @@
 import argparse
 import asyncio
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
@@ -10,13 +10,13 @@ import uuid
 
 from dotenv import load_dotenv
 
-from arcagi2.api.clients import AbstractAPIClient
 from arcagi2.evaluation.dashboard import StatusDashboard
 from arcagi2.evaluation.utils import Metadata, EvaluationStatus, sort_by_majority
+from arcagi2.sandbox.daytona_sandbox import DaytonaSandbox
 from arcagi2.solver.config import SOLVER_CONFIGS
 from arcagi2.solver.config.base import SolverConfig
 from arcagi2.solver.solver import solver
-from arcagi2.utils.logging_utils import setup_infra_logger_console_handler
+from arcagi2.utils.logging_utils import setup_infra_logger_console_handler, infra_logger
 from arcagi2.utils.utils import read_file, save_json
 
 
@@ -282,6 +282,7 @@ async def puzzle_worker(
                     metadata.to_dict(), 
                     puzzle_output_folder / "metadata.json"
                 )
+            logger.info(f"Puzzle {puzzle_id} with UID {uid} completed successfully")
         except Exception:
             logger.exception(f"Error in saving puzzle metadata for puzzle {puzzle_id} and UID {uid} after puzzle worker completed successfully")
     finally:
@@ -309,7 +310,7 @@ async def evaluate(
     logging.getLogger("httpx").setLevel(logging.WARNING)
     # Configure console output for infrastructure issues (rate limits, connection errors, sandbox failures)
     # Setting up here since Kaggle notebooks will use the function directly instead of running this file as a script.
-    setup_infra_logger_console_handler(logging.WARNING)
+    setup_infra_logger_console_handler(logging.INFO)
 
     if env_file is not None:
         logger.info(f"Loading environment variables from {env_file}")
@@ -321,12 +322,8 @@ async def evaluate(
     config = SOLVER_CONFIGS[config_name]
     logger.info(f"Using config: {config_name}")
 
-    for field in fields(config):
-        value = getattr(config, field.name)
-        if isinstance(value, AbstractAPIClient.CallConfig):
-            call_config = value        
-            if call_config.api_provider.name == "vllm":
-                    call_config.api_provider.base_url = vllm_base_url
+    if vllm_base_url is not None:
+        config.set_vllm_base_url(vllm_base_url)
 
     output_folder = Path(output_folder)
     if not output_folder.is_absolute():
@@ -399,39 +396,61 @@ async def evaluate(
             poll_interval=60,
             max_rows=5,
         )
-        dashboard_task = asyncio.create_task(dashboard.run())
 
         # Create semaphore to control concurrency
         semaphore = asyncio.Semaphore(parallel)
 
-        tasks = [
-            asyncio.create_task(
-                puzzle_worker(
-                    puzzle_id=puzzle_id,
-                    puzzle_json=puzzle_json,
-                    semaphore=semaphore,
-                    lock=lock,
-                    config=config,
-                    evaluation_output_folder=output_folder,
-                    submission_file=submission_file,
-                    num_samples=num_samples,
-                )
-            ) for puzzle_id, puzzle_json in challenge.items()
-        ]
-
+        tasks = []
+        dashboard_task = None
+        daytona_cleaner_task = None
         try:
             async with asyncio.timeout(timeout_hours * 3600):
+                tasks = [
+                    asyncio.create_task(
+                        puzzle_worker(
+                            puzzle_id=puzzle_id,
+                            puzzle_json=puzzle_json,
+                            semaphore=semaphore,
+                            lock=lock,
+                            config=config,
+                            evaluation_output_folder=output_folder,
+                            submission_file=submission_file,
+                            num_samples=num_samples,
+                        )
+                    ) for puzzle_id, puzzle_json in challenge.items()
+                ]
+                dashboard_task = asyncio.create_task(dashboard.run())
+                if config.uses_daytona:
+                    daytona_cleaner_task = asyncio.create_task(
+                        DaytonaSandbox.cleaner(sleep_interval=60)
+                    )
                 await asyncio.gather(*tasks)
             logger.info("Evaluation completed successfully")
             await dashboard.update()
+        except asyncio.TimeoutError:
+            logger.info("Evaluation timed out.")
+            dashboard.echo("Time's up. Finishing evaluation.")
+            raise
         except Exception as e:
-            dashboard.print_error(e)
+            logger.exception("Evaluation failed.")
+            dashboard.echo(f"Error: {e}.\nAll tasks have been cancelled. Evaluation failed.")
             raise
         finally:
             try:
                 async with asyncio.timeout(10 * 60):    # Give 10 minutes for tasks to finish gracefully
-                    dashboard_task.cancel()
-                    await asyncio.gather(dashboard_task, return_exceptions=True)
+                    if dashboard_task is not None:
+                        dashboard_task.cancel()
+                        await asyncio.gather(dashboard_task, return_exceptions=True)
+
+                    if daytona_cleaner_task is not None:
+                        daytona_cleaner_task.cancel()
+                        await asyncio.gather(daytona_cleaner_task, return_exceptions=True)
+                        try:
+                            await DaytonaSandbox.cleanup_orphans()
+                        except Exception as e:
+                            logger.exception("Error during final cleanup of Daytona sandboxes")
+                            infra_logger.warning(f"Error during final cleanup of Daytona sandboxes: {e}")
+
                     for t in tasks:
                         t.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)

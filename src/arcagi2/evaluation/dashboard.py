@@ -326,6 +326,6 @@ class StatusDashboard:
             await self.update()
             await asyncio.sleep(self.poll_interval)
 
-    def print_error(self, error: Exception):
-        """Print a single line indicating an error occurred."""
-        print(f"Error: {error}.\nAll tasks have been cancelled. Evaluation failed.")
+    def echo(self, message: str):
+        """Print a message to the console."""
+        print(message)
