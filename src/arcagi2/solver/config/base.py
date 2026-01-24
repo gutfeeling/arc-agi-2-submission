@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Type
 
@@ -44,8 +44,6 @@ DAYTONA_SANDBOX_KWARGS = {
 
 @dataclass
 class SolverConfig(SerializableDataclassMixin):
-    num_samples: int = 5
-
     # For avoidable model failures and avoidable sandbox bugs
     max_retries: int = 2
 
@@ -59,13 +57,37 @@ class SolverConfig(SerializableDataclassMixin):
     code_timeout: float = 120
     use_tools: bool = True
 
+    def set_vllm_base_url(self, vllm_base_url: str) -> None:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if isinstance(value, AbstractAPIClient.CallConfig):
+                call_config = value        
+                if call_config.api_provider.name == "vllm":
+                    call_config.api_provider.base_url = vllm_base_url
+
+    @property
+    def uses_daytona(self) -> bool:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if isinstance(value, AbstractAPIClient.CallConfig):
+                call_config = value        
+                if call_config.sandbox_cls is DaytonaSandbox:
+                    return True
+        return False
+
 @dataclass(kw_only=True)
 class InterleavedThinkingConfig(SolverConfig):
     sandbox_cls: Type[Sandbox]
     sandbox_kwargs: dict
+    num_samples: int = 5
     interleaved_thinking_solver: AbstractAPIClient.CallConfig
     soft_verifier: AbstractAPIClient.CallConfig
     generalizer: AbstractAPIClient.CallConfig
+
+
+    @property
+    def uses_daytona(self) -> bool:
+        return self.sandbox_cls is DaytonaSandbox or super().uses_daytona
 
 @dataclass(kw_only=True)
 class BaselineConfig(SolverConfig):

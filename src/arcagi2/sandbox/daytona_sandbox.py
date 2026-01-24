@@ -24,10 +24,11 @@ _daytona_async_code.connect = _PatchedConnect
 _daytona_sync_code.connect = _PatchedConnect
 # End of Daytona websocket patch
 
+import asyncio
 import logging
 import os
 import re
-from typing import Optional, Self
+from typing import ClassVar, Optional, Self
 
 from daytona import AsyncDaytona, DaytonaConfig, DaytonaError, DaytonaTimeoutError, Image, CreateSandboxFromImageParams, Resources
 
@@ -179,6 +180,41 @@ class DaytonaSandbox(Sandbox):
             async with sandbox.create_repl() as repl:
                 result = await repl.execute("print('hello')")
     """
+    _ORPHANS: ClassVar[set[str]] = set()
+    _LOCK: ClassVar[asyncio.Lock] = asyncio.Lock()
+
+    @classmethod
+    async def cleanup_orphans(cls, api_key: Optional[str] = None) -> None:
+        """Attempt to delete all orphan sandboxes."""
+        api_key = api_key or os.environ.get("DAYTONA_API_KEY")
+        if api_key is None:
+            raise ValueError("Daytona API key is required. Set DAYTONA_API_KEY environment variable.")
+        config = DaytonaConfig(api_key=api_key)
+        async with cls._LOCK:
+            to_delete = list(cls._ORPHANS)
+            if len(to_delete) == 0:
+                return
+        async with AsyncDaytona(config) as daytona:
+            for sandbox_id in to_delete:
+                try:
+                    sandbox = await daytona.get(sandbox_id)
+                    await sandbox.delete()
+                except DaytonaError as e:
+                    infra_logger.warning(f"Failed to delete orphan sandbox {sandbox_id}: {e}")
+                else:
+                    infra_logger.info(f"Deleted orphan sandbox {sandbox_id}")
+                    async with cls._LOCK:
+                        cls._ORPHANS.discard(sandbox_id)    
+
+    @classmethod
+    async def cleaner(cls, sleep_interval: int) -> None:
+        """Worker for cleaning up orphan sandboxes periodically."""
+        while True:
+            try:
+                await cls.cleanup_orphans()
+            except Exception as e:
+                infra_logger.warning(f"Failed to cleanup orphans: {e}")
+            await asyncio.sleep(sleep_interval)
     
     def __init__(self, image: Image, resources: Resources, creation_timeout: int, auto_stop_interval: int, api_key: Optional[str] = None):
         """
@@ -226,11 +262,15 @@ class DaytonaSandbox(Sandbox):
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self._sandbox is not None:
+            sandbox_id = self._sandbox.id
             try:
                 await self._sandbox.delete()
                 logger.info("Daytona sandbox deleted")
             except DaytonaError as e:
                 infra_logger.warning(f"Failed to delete Daytona sandbox: {e}")
+                async with self._LOCK:
+                    infra_logger.info(f"Registering orphan sandbox {sandbox_id} for later cleanup")
+                    self._ORPHANS.add(sandbox_id)
             finally:
                 self._sandbox = None
         

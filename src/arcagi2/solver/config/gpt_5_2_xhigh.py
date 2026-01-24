@@ -14,7 +14,7 @@ from arcagi2.tools.repl_tool import REPLToolWithProtection
 
 
 _COMMON_KWARGS = dict(
-    model="gpt-5.2",
+    model="gpt-5.2-2025-12-11",
     api_provider=OPENAI_API_PROVIDER,
     system_prompt_path=PROMPTS_FOLDER / "system_prompt.txt",
     client_kwargs={"timeout": Timeout(timeout=60.0, connect=5.0)},  # In background mode, retrieve should return fast

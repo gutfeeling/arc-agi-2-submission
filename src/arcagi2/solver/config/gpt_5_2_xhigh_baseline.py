@@ -6,7 +6,7 @@ from arcagi2.solver.config.base import BaselineConfig, PROMPTS_FOLDER
 
 
 PLAIN_COT_SOLVER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
-    model="gpt-5.2",
+    model="gpt-5.2-2025-12-11",
     api_provider=OPENAI_API_PROVIDER,
     prompt_path = PROMPTS_FOLDER / "plain_cot_solver.txt",
     system_prompt_path=None,
