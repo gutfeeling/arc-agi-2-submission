@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
@@ -22,84 +21,43 @@ from arcagi2.utils.utils import read_file, save_json
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class MajorityVoteResult:
-    submission: dict[str, list[dict]]
-    stop: bool
 
 def get_majority_voted_submission(
-    results: dict[str, list[dict]],
+    results: list[dict[str, list[dict]]],
     puzzle_id: str,
     puzzle_json: dict,
-) -> MajorityVoteResult:
+) -> dict[str, list[dict]]:
     """
-    Get the majority voted submission from the results and make an early stopping decision.
-    
-    Early stopping logic: 
-    - For the interleaved thinking solver, we check if two generalized solutions agree for all tests.
-    - For plain COT solver, we check if any two solutions agree for all tests.
-    Since both generalized solution and the plain COT solution uses "attempt_1", checking if two "attempt_1"s agree works in both cases.
+    Get the majority voted submission from the results.
 
-    Majority voting logic:
-    - For the plain COT solver, we just use usual majority voting.
-    - For the interleaved thinking solver, we do the following:
-        - Output the highest voted generalized solution as "attempt_1" if it got >=2 votes.
-        - For any remaining attempts, we do usual majority voting between the remaining outputs, with preference given to generalized solutions in case of a tie.
-    This can also be encapsulated in a common logic that works for both plain COT and interleaved thinking.
+    The solver currently returns only one attempt. Therefore, the majority voting logic is applied to Attempt 1 only. 
+    Attempt 2 is always None and not used.
+
+    The output attempt_1 and attempt_2 are the first and second most frequent grids in the results, respectively.
     """
+
     submission = [{"attempt_1": None, "attempt_2": None} for _ in range(len(puzzle_json["test"]))]
-    stop = True
     logger.info(f"Majority voting info for puzzle {puzzle_id}: num_results={len(results)}")
     for test_index in range(len(puzzle_json["test"])):
-        excluded = None
         attempt_1_outputs = [
             result[puzzle_id][test_index]["attempt_1"] for result in results if result[puzzle_id][test_index]["attempt_1"] is not None
         ]
         sorted_attempt_1_outputs = sort_by_majority(attempt_1_outputs)
-        if len(sorted_attempt_1_outputs) == 0:
-            stop = False
-        else:
-            votes = sorted_attempt_1_outputs[0][1]
-            if votes >= 2:
-                submission[test_index]["attempt_1"] = sorted_attempt_1_outputs[0][0]
-                excluded = sorted_attempt_1_outputs[0][0]
-            else:
-                stop = False
-        attempt_2_outputs = [
-            result[puzzle_id][test_index]["attempt_2"] for result in results if result[puzzle_id][test_index]["attempt_2"] is not None
-        ]
-        all_other_outputs = [grid for grid in attempt_1_outputs + attempt_2_outputs if grid != excluded]
-        sorted_all_other_outputs = sort_by_majority(all_other_outputs)
-        
-        # Build ordered list of unique grids for logging (before popping)
-        unique_grids = []
-        if excluded is not None:
-            unique_grids.append(excluded)
-        unique_grids.extend([grid for grid, _ in sorted_all_other_outputs])
+
+        # For each grid, log which results contributed
+        grid_contributions = {
+            grid_idx: [result_idx for result_idx, result in enumerate(results) if result[puzzle_id][test_index]["attempt_1"] == grid]
+            for grid_idx, (grid, _) in enumerate(sorted_attempt_1_outputs)
+        }
+        logger.info(f"Majority voting info for puzzle {puzzle_id} test {test_index}: {grid_contributions}")
         
         for attempt_idx in range(2):
-            if submission[test_index][f"attempt_{attempt_idx + 1}"] is None:
-                try:
-                    submission[test_index][f"attempt_{attempt_idx + 1}"] = sorted_all_other_outputs.pop(0)[0]
-                except IndexError:
-                    pass
+            try:
+                submission[test_index][f"attempt_{attempt_idx + 1}"] = sorted_attempt_1_outputs.pop(0)[0]
+            except IndexError:
+                pass
         
-        # For each grid, find which results contributed and with which attempt
-        grid_contributions = {}
-        for grid_idx, grid in enumerate(unique_grids):
-            contributions = []
-            for result_idx, result in enumerate(results):
-                if result[puzzle_id][test_index]["attempt_1"] == grid:
-                    contributions.append((result_idx, "attempt_1"))
-                if result[puzzle_id][test_index]["attempt_2"] == grid:
-                    contributions.append((result_idx, "attempt_2"))
-            grid_contributions[grid_idx] = contributions
-        logger.info(f"Majority voting info for puzzle {puzzle_id} test {test_index}: {grid_contributions}")
-    logger.info(f"Majority voting info for puzzle {puzzle_id}: early stopping decision={stop}")
-    return MajorityVoteResult(
-        submission={puzzle_id: submission}, 
-        stop=stop
-    )
+    return {puzzle_id: submission}
 
 async def sample_worker(
         semaphore: asyncio.Semaphore, 
@@ -212,40 +170,25 @@ async def puzzle_worker(
                     puzzle_json=puzzle_json,
                     puzzle_output_folder=puzzle_output_folder,
                 )
-            ) for _ in range(min(2, num_samples))
+            ) for _ in range(num_samples)
         ]
         while True:
             done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
             num_finished_tasks += len(done)
-            all_results.extend(
-                [t.result() for t in done if not t.cancelled() and t.exception() is None]
-            )
-            majority_vote_result = get_majority_voted_submission(
-                results=all_results, 
-                puzzle_id=puzzle_id,
-                puzzle_json=puzzle_json
-            )
-            async with lock:
-                submission = json.loads(read_file(submission_file))
-                submission = {**submission, **majority_vote_result.submission}
-                save_json(submission, submission_file)
-            if majority_vote_result.stop or num_finished_tasks >= num_samples:    # early stopping or max samples reached
-                break
-            elif len(pending) > 0:    # some tasks are still running, wait for them to finish
-                continue
-            else:    # nothing is running and stopping criteria not reached, start a new sample
-                pending.add(
-                    asyncio.create_task(
-                        sample_worker(
-                            semaphore=semaphore,
-                            lock=lock,
-                            config=config,
-                            puzzle_id=puzzle_id,
-                            puzzle_json=puzzle_json,
-                            puzzle_output_folder=puzzle_output_folder,
-                        )
-                    )
+            new_results = [t.result() for t in done if not t.cancelled() and t.exception() is None]
+            if len(new_results) > 0:
+                all_results.extend(new_results)
+                majority_vote_result = get_majority_voted_submission(
+                    results=all_results, 
+                    puzzle_id=puzzle_id,
+                    puzzle_json=puzzle_json
                 )
+                async with lock:
+                    submission = json.loads(read_file(submission_file))
+                    submission = {**submission, **majority_vote_result}
+                    save_json(submission, submission_file)
+            if num_finished_tasks >= num_samples:    # max samples reached
+                break
     except Exception:
         try:
             logger.exception(f"Error in puzzle worker for puzzle {puzzle_id} and UID {uid}")
@@ -497,7 +440,7 @@ def parse_arguments() -> argparse.Namespace:
         "-n", "--num_samples",
         type=int,
         required=True,
-        help="Number of samples for majority voting with early stopping e.g. for pass@2 evaluation of plain COT solver or for stabilizing score of interleaved thinking solver."
+        help="Number of samples. Choose 2 for pass@2 evaluation."
     )
     parser.add_argument(
         "-p", "--parallel",

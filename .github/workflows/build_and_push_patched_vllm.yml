@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - dibya/publication
     paths:
       - "src/vllm_patch/**"
       - ".github/workflows/**"

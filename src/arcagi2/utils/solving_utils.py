@@ -1,7 +1,6 @@
 import ast
 import logging
 import json
-import uuid
 
 from arcagi2.sandbox.base import Sandbox
 from arcagi2.utils.config.base import CODE_TEMPLATES_FOLDER
@@ -30,7 +29,6 @@ async def solution_works_on_training_examples(
         f"puzzle={repr(get_copy_without_solutions(puzzle))}",
         solution,
         check_solution_on_training_examples_code_template,
-        "import json\n\njson.dumps(diff_info, indent=4)",
         "print(' '.join(str(score) for score in results))",
     ]
     # There's an issue in IPyBox where the last cell's output is not always returned and we get None instead.
@@ -45,80 +43,18 @@ async def solution_works_on_training_examples(
             max_backoff_retries=max_backoff_retries,
             **kwargs
         )
-        diff_str_output = result[-3].text
-        diff_info_output = result[-2].text    # Never saw a case where this is None, but still checking for safety
         score_output = result[-1].text    # This sometimes returns None
-        if diff_str_output is None or diff_info_output is None or score_output is None:
+        if score_output is None:
             if attempt < max_retries:
-                logger.warning(f"Hit the IPyBox bug: diff_str_output, diff_info_output, or score_output is unexpectedly None. Retrying...")
+                logger.warning(f"Hit the IPyBox bug: score_output is unexpectedly None. Retrying...")
                 attempt += 1
                 continue
             else:
-                raise RuntimeError("Hit the IPyBox bug: diff_str_output, diff_info_output, or score_output is unexpectedly None")
+                raise RuntimeError("Hit the IPyBox bug: score_output is unexpectedly None")
         else:
             break
-    diff_str = diff_str_output.strip()
-    diff_info = json.loads(ast.literal_eval(diff_info_output))
     score = [int(score) for score in score_output.split()]
-    return diff_str, diff_info, score
-
-async def get_coverage_report(
-        sandbox_cls: Sandbox,
-        puzzle: dict, 
-        solution: str,
-        max_retries: int,
-        base_delay: int,
-        delay_multiplier: float,
-        max_delay: int,
-        max_backoff_retries: int,
-        timeout: float,
-        **kwargs
-        ) -> tuple[str, str, dict, dict]:
-    # Container must have coverage installed
-    analyze_coverage_code_template = read_file(
-        CODE_TEMPLATES_FOLDER / "analyze_coverage.py"
-    )
-    random_id = uuid.uuid4().hex[:9]
-    analyze_coverage_code_template = analyze_coverage_code_template.replace("{{random_id}}", random_id)
-    cells = [
-        f"puzzle={repr(get_copy_without_solutions(puzzle))}",
-        f"%%writefile solution_code_{random_id}.py\n{solution}",
-        analyze_coverage_code_template,
-        "train_reports = generate_coverage_report(puzzle, data_type='train')",
-        "test_reports = generate_coverage_report(puzzle, data_type='test')",
-        "import json\n\njson.dumps(train_reports, indent=4)",
-        "json.dumps(test_reports, indent=4)",
-    ]
-    # There's an issue in IPyBox where the last cell's output is not always returned and we get None instead.
-    attempt = 0
-    while True:
-        result = await sandbox_cls.run_cells(
-            cells,
-            timeout=timeout,
-            base_delay=base_delay,
-            delay_multiplier=delay_multiplier,
-            max_delay=max_delay,
-            max_backoff_retries=max_backoff_retries,
-            **kwargs
-        )
-        train_reports_str_output = result[-4].text    # Never saw a case where this is None, but still checking for safety
-        test_reports_str_output = result[-3].text    # Never saw a case where this is None, but still checking for safety
-        train_reports_output = result[-2].text    # Never saw a case where this is None, but still checking for safety
-        test_reports_output = result[-1].text    # Never saw a case where this is None, but still checking for safety
-        if train_reports_str_output is None or test_reports_str_output is None or train_reports_output is None or test_reports_output is None:
-            if attempt < max_retries:
-                logger.warning(f"Hit the IPyBox bug: train_reports_str_output, test_reports_str_output, train_reports_output, or test_reports_output is unexpectedly None. Retrying...")
-                attempt += 1
-                continue
-            else:
-                raise RuntimeError("Hit the IPyBox bug: train_reports_str_output, test_reports_str_output, train_reports_output, or test_reports_output is unexpectedly None")
-        else:
-            break
-    train_reports_str = train_reports_str_output.strip()
-    test_reports_str = test_reports_str_output.strip()
-    train_reports = json.loads(ast.literal_eval(train_reports_output))
-    test_reports = json.loads(ast.literal_eval(test_reports_output))
-    return train_reports_str, test_reports_str, train_reports, test_reports
+    return score
 
 async def get_output_grid_from_solution(
         sandbox_cls: Sandbox,

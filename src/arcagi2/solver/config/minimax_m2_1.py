@@ -1,7 +1,7 @@
 from arcagi2.api.clients import AsyncMessagesAPIClient
 from arcagi2.api.providers import MINIMAX_API_PROVIDER
 from arcagi2.solver.config.base import (
-    InterleavedThinkingConfig, 
+    AgenticCodingConfig, 
     PROMPTS_FOLDER, 
     DAYTONA_SANDBOX_CLS,
     DAYTONA_SANDBOX_KWARGS,
@@ -45,36 +45,20 @@ _DAYTONA_COMMON_KWARGS = dict(
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
 )
 
-MINIMAX_M2_1_SYSTEM_CONFIG = InterleavedThinkingConfig(
+MINIMAX_M2_1_AGENTIC_CODING_CONFIG = AgenticCodingConfig(
     sandbox_cls=IPYBOX_SANDBOX_CLS,
     sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncMessagesAPIClient.MessagesAPICallConfig(
+    call_config=AsyncMessagesAPIClient.MessagesAPICallConfig(
         **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+        prompt_path=PROMPTS_FOLDER / "agentic_coding_solver.txt"
     ),
 )
 
-MINIMAX_M2_1_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
+MINIMAX_M2_1_DAYTONA_AGENTIC_CODING_CONFIG = AgenticCodingConfig(
     sandbox_cls=DAYTONA_SANDBOX_CLS,
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncMessagesAPIClient.MessagesAPICallConfig(
+    call_config=AsyncMessagesAPIClient.MessagesAPICallConfig(
         **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncMessagesAPIClient.MessagesAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+        prompt_path=PROMPTS_FOLDER / "agentic_coding_solver.txt"
     ),
 )

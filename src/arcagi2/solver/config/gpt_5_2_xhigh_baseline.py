@@ -2,28 +2,26 @@ from httpx import Timeout
 
 from arcagi2.api.clients import AsyncResponsesAPIClient
 from arcagi2.api.providers import OPENAI_API_PROVIDER
-from arcagi2.solver.config.base import BaselineConfig, PROMPTS_FOLDER
+from arcagi2.solver.config.base import PlainCOTConfig, PROMPTS_FOLDER
 
 
-PLAIN_COT_SOLVER = AsyncResponsesAPIClient.ResponsesAPICallConfig(
-    model="gpt-5.2-2025-12-11",
-    api_provider=OPENAI_API_PROVIDER,
-    prompt_path = PROMPTS_FOLDER / "plain_cot_solver.txt",
-    system_prompt_path=None,
-    client_kwargs = {
-        "timeout": Timeout(timeout=60.0, connect=5.0),    # In background mode, retrieve should return fast
-    },
-    raw_request_kwargs = {
-        "reasoning": {
-            "effort": "xhigh",
+GPT_5_2_XHIGH_PLAIN_COT_CONFIG = PlainCOTConfig(
+    call_config=AsyncResponsesAPIClient.ResponsesAPICallConfig(
+        model="gpt-5.2-2025-12-11",
+        api_provider=OPENAI_API_PROVIDER,
+        prompt_path = PROMPTS_FOLDER / "plain_cot_solver.txt",
+        system_prompt_path=None,
+        client_kwargs = {
+            "timeout": Timeout(timeout=60.0, connect=5.0),    # In background mode, retrieve should return fast
         },
-        "background": True,
-        # Background mode requires store=True
-        "store": True   
-    },
-    background_mode_polling_interval=2,
-)
-
-GPT_5_2_XHIGH_BASELINE_CONFIG = BaselineConfig(
-    plain_cot_solver=PLAIN_COT_SOLVER,
+        raw_request_kwargs = {
+            "reasoning": {
+                "effort": "xhigh",
+            },
+            "background": True,
+            # Background mode requires store=True
+            "store": True   
+        },
+        background_mode_polling_interval=2,
+    )
 )
