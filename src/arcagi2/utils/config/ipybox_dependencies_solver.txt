@@ -7,5 +7,4 @@
 "pillow",
 "python-constraint",
 "ortools",
-"z3-solver",
-"coverage"
+"z3-solver"
