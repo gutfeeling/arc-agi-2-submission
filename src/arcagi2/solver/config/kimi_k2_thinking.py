@@ -1,9 +1,7 @@
-from httpx import Timeout
-
 from arcagi2.api.clients import AsyncChatCompletionsAPIClient
 from arcagi2.api.providers import MOONSHOT_AI_API_PROVIDER
 from arcagi2.solver.config.base import (
-    InterleavedThinkingConfig, 
+    AgenticCodingConfig, 
     PROMPTS_FOLDER, 
     IPYBOX_SANDBOX_CLS, 
     IPYBOX_SANDBOX_KWARGS,
@@ -46,36 +44,20 @@ _DAYTONA_COMMON_KWARGS = dict(
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
 )
 
-KIMI_K2_THINKING_SYSTEM_CONFIG = InterleavedThinkingConfig(
+KIMI_K2_THINKING_AGENTIC_CODING_CONFIG = AgenticCodingConfig(
     sandbox_cls=IPYBOX_SANDBOX_CLS,
     sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
+    call_config=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
         **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+        prompt_path=PROMPTS_FOLDER / "agentic_coding_solver.txt"
     ),
 )
 
-KIMI_K2_THINKING_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
+KIMI_K2_THINKING_DAYTONA_AGENTIC_CODING_CONFIG = AgenticCodingConfig(
     sandbox_cls=DAYTONA_SANDBOX_CLS,
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
+    call_config=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
         **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncChatCompletionsAPIClient.ChatCompletionsAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+        prompt_path=PROMPTS_FOLDER / "agentic_coding_solver.txt"
     ),
 )

@@ -3,17 +3,14 @@ from dataclasses import dataclass
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from arcagi2.evaluation.utils import Metadata, EvaluationStatus
-from arcagi2.solver.solver import SolverStatus
 from arcagi2.utils.utils import read_file
 
 @dataclass
 class SampleState:
     """State for a sample, used in dashboard for display and change detection."""
     metadata: Metadata
-    solver_status: Optional[SolverStatus]
 
 @dataclass
 class PuzzleState:
@@ -80,14 +77,8 @@ class StatusDashboard:
                         try:
                             sample_data = json.loads(read_file(sample_metadata_file))
                             sample_metadata = Metadata.from_dict(sample_data)
-                            # Get solver status for running samples
-                            if sample_metadata.status == EvaluationStatus.RUNNING:
-                                solver_status = SolverStatus.from_output_folder(sample_folder)
-                            else:
-                                solver_status = None
                             samples[sample_folder.name] = SampleState(
                                 metadata=sample_metadata,
-                                solver_status=solver_status,
                             )
                         except Exception:
                             continue
@@ -118,21 +109,8 @@ class StatusDashboard:
                 prev_sample = prev_samples.get(sample_id)
                 if prev_sample is None:
                     changes.append(f"started: puzzle {puzzle_state.metadata.puzzle_id} / folder {puzzle_uid} / {sample_id}")
-                else:
-                    if sample_state.metadata.status != prev_sample.metadata.status:
-                        changes.append(f"{sample_state.metadata.status.value}: puzzle {puzzle_state.metadata.puzzle_id} / folder {puzzle_uid} / {sample_id}")
-                    elif sample_state.solver_status is not None:
-                        prev_solver = prev_sample.solver_status
-                        prev_sample_num = prev_solver.sample_num if prev_solver else None
-                        prev_stage = prev_solver.stage if prev_solver else None
-                        curr_sample_num = sample_state.solver_status.sample_num
-                        curr_stage = sample_state.solver_status.stage
-                        if curr_sample_num != prev_sample_num or curr_stage != prev_stage:
-                            if curr_sample_num is not None:
-                                status_str = f"sample {curr_sample_num} / {curr_stage}"
-                            else:
-                                status_str = "starting"
-                            changes.append(f"{status_str}: puzzle {puzzle_state.metadata.puzzle_id} / folder {puzzle_uid} / {sample_id}")
+                elif sample_state.metadata.status != prev_sample.metadata.status:
+                    changes.append(f"{sample_state.metadata.status.value}: puzzle {puzzle_state.metadata.puzzle_id} / folder {puzzle_uid} / {sample_id}")
         return changes
 
     # Formatting helpers for _build_display
@@ -166,14 +144,9 @@ class StatusDashboard:
         lines = []
         for sample_id, sample_state in sorted(samples.items()):
             if sample_state.metadata.status == EvaluationStatus.RUNNING:
-                # For running samples, show sample N / stage with start time and elapsed
-                solver_status = sample_state.solver_status
-                if solver_status and solver_status.sample_num is not None:
-                    status_str = f"sample {solver_status.sample_num} / {solver_status.stage}"
-                else:
-                    status_str = "starting"
+                # For running samples, show start time and elapsed
                 elapsed = (now - sample_state.metadata.start_time).total_seconds()
-                lines.append(f"    {sample_id}: {status_str} | started {StatusDashboard._format_time(sample_state.metadata.start_time)} | elapsed {StatusDashboard._format_duration(elapsed)}")
+                lines.append(f"    {sample_id}: running | started {StatusDashboard._format_time(sample_state.metadata.start_time)} | elapsed {StatusDashboard._format_duration(elapsed)}")
             else:
                 # For finished samples, show the final status and duration
                 duration_str = StatusDashboard._format_duration(sample_state.metadata.duration_seconds)

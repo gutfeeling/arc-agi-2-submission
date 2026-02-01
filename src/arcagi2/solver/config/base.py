@@ -12,7 +12,6 @@ from arcagi2.utils.utils import SerializableDataclassMixin
 
 
 PROMPTS_FOLDER = Path(__file__).absolute().parents[1] / "prompts"
-CODE_TEMPLATES_FOLDER = Path(__file__).absolute().parents[1] / "code_templates"
 
 IPYBOX_SANDBOX_CLS = IPyBoxSandbox
 IPYBOX_SANDBOX_KWARGS = {"tag": "ipybox:solver"} # "localhost/ipybox:solver" if using podman
@@ -29,8 +28,7 @@ DAYTONA_SANDBOX_KWARGS = {
         "pillow",
         "python-constraint", 
         "ortools", 
-        "z3-solver", 
-        "coverage",
+        "z3-solver",
         "ipykernel" 
     ]),
     "resources": Resources(
@@ -44,6 +42,8 @@ DAYTONA_SANDBOX_KWARGS = {
 
 @dataclass
 class SolverConfig(SerializableDataclassMixin):
+    call_config: AbstractAPIClient.CallConfig
+
     # For avoidable model failures and avoidable sandbox bugs
     max_retries: int = 2
 
@@ -76,20 +76,10 @@ class SolverConfig(SerializableDataclassMixin):
         return False
 
 @dataclass(kw_only=True)
-class InterleavedThinkingConfig(SolverConfig):
+class AgenticCodingConfig(SolverConfig):
     sandbox_cls: Type[Sandbox]
     sandbox_kwargs: dict
-    num_samples: int = 5
-    interleaved_thinking_solver: AbstractAPIClient.CallConfig
-    soft_verifier: AbstractAPIClient.CallConfig
-    generalizer: AbstractAPIClient.CallConfig
-
-
-    @property
-    def uses_daytona(self) -> bool:
-        return self.sandbox_cls is DaytonaSandbox or super().uses_daytona
 
 @dataclass(kw_only=True)
-class BaselineConfig(SolverConfig):
+class PlainCOTConfig(SolverConfig):
     use_tools: bool = False
-    plain_cot_solver: AbstractAPIClient.CallConfig

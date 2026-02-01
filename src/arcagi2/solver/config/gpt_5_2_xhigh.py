@@ -3,7 +3,7 @@ from httpx import Timeout
 from arcagi2.api.clients import AsyncResponsesAPIClient
 from arcagi2.api.providers import OPENAI_API_PROVIDER
 from arcagi2.solver.config.base import (
-    InterleavedThinkingConfig, 
+    AgenticCodingConfig, 
     PROMPTS_FOLDER, 
     IPYBOX_SANDBOX_CLS, 
     IPYBOX_SANDBOX_KWARGS,
@@ -14,7 +14,7 @@ from arcagi2.tools.repl_tool import REPLToolWithProtection
 
 
 _COMMON_KWARGS = dict(
-    model="gpt-5.2-2025-12-11",
+    model="gpt-5.2",
     api_provider=OPENAI_API_PROVIDER,
     system_prompt_path=PROMPTS_FOLDER / "system_prompt.txt",
     client_kwargs={"timeout": Timeout(timeout=60.0, connect=5.0)},  # In background mode, retrieve should return fast
@@ -45,36 +45,20 @@ _DAYTONA_COMMON_KWARGS = dict(
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
 )
 
-GPT_5_2_XHIGH_SYSTEM_CONFIG = InterleavedThinkingConfig(
+GPT_5_2_XHIGH_AGENTIC_CODING_CONFIG = AgenticCodingConfig(
     sandbox_cls=IPYBOX_SANDBOX_CLS,
     sandbox_kwargs=IPYBOX_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncResponsesAPIClient.ResponsesAPICallConfig(
+    call_config=AsyncResponsesAPIClient.ResponsesAPICallConfig(
         **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncResponsesAPIClient.ResponsesAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncResponsesAPIClient.ResponsesAPICallConfig(
-        **_IPYBOX_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+        prompt_path=PROMPTS_FOLDER / "agentic_coding_solver.txt"
     ),
 )
 
-GPT_5_2_XHIGH_DAYTONA_SYSTEM_CONFIG = InterleavedThinkingConfig(
+GPT_5_2_XHIGH_DAYTONA_AGENTIC_CODING_CONFIG = AgenticCodingConfig(
     sandbox_cls=DAYTONA_SANDBOX_CLS,
     sandbox_kwargs=DAYTONA_SANDBOX_KWARGS,
-    interleaved_thinking_solver=AsyncResponsesAPIClient.ResponsesAPICallConfig(
+    call_config=AsyncResponsesAPIClient.ResponsesAPICallConfig(
         **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "interleaved_thinking_solver.txt"
-    ),
-    soft_verifier=AsyncResponsesAPIClient.ResponsesAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "soft_verifier.txt"
-    ),
-    generalizer=AsyncResponsesAPIClient.ResponsesAPICallConfig(
-        **_DAYTONA_COMMON_KWARGS,
-        prompt_path=PROMPTS_FOLDER / "generalizer.txt"
+        prompt_path=PROMPTS_FOLDER / "agentic_coding_solver.txt"
     ),
 )

@@ -92,10 +92,6 @@ def get_code_block_defining_function_from_text(text: str, function_name: str) ->
 def get_markdown_heading(heading_level: int) -> str:
     return "#" * heading_level
 
-def get_json_matches(text: str) -> list[re.Match[str]]:
-    json_pattern = r"(?m)^```json\s*\n([\s\S]*?)^```"
-    return list(re.finditer(json_pattern, text))
-
 def get_code_matches(text: str) -> list[re.Match[str]]:
     code_pattern = r"(?m)^```python\s*\n([\s\S]*?)^```"
     return list(re.finditer(code_pattern, text))

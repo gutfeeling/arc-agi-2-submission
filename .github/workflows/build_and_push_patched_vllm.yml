@@ -15,7 +15,7 @@ permissions:
 
 env:
   IMAGE_NAME: vllm-openai
-  IMAGE_TAG: v0.11.0-submission-patch
+  IMAGE_TAG: v0.11.0-patch
 
 jobs:
   # ------------------------------------------------------------

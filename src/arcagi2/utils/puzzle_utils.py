@@ -1,16 +1,10 @@
 from typing import Union
 
-import numpy as np
-
 from arcagi2.utils.utils import get_markdown_heading
 
 
 def grid_to_text(grid: list[list[int]]) -> str:
     return "\n".join(" ".join(map(str, row)) for row in grid)
-
-def text_to_grid(text: str) -> list[list[int]]:
-    lines = text.strip().split("\n")
-    return np.array([list(map(int, line.split())) for line in lines])
 
 def puzzle_to_text(
     puzzle: dict,
@@ -58,12 +52,6 @@ def puzzle_to_text(
         f"{training_text}{separator}{testing_heading_singular}{separator}{text}"
         for text in testing_text
     ]
-
-def get_copy_without_tests(puzzle: dict) -> dict:
-    return {
-        "train": puzzle["train"],
-        "test": [],
-    }
 
 def get_copy_without_solutions(puzzle: dict) -> dict:
     return {
