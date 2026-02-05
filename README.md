@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![ARC-AGI](https://img.shields.io/badge/Task-ARC--AGI-red)](https://arcprize.org/)
 
-This repository allows reproduction of the blog post [Applying agentic coding to ARC AGI 2](https://pivotools.github.io/pivotools-quarto-blog/posts/agentic_coding_arc_agi/).
+This repository allows reproduction of the blog post [Agentic coding improves ARC AGI 2 performance across models](https://pivotools.github.io/pivotools-quarto-blog/posts/agentic_coding_arc_agi/).
 
 ## 1. Installing
 ```bash
