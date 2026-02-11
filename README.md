@@ -4,7 +4,15 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![ARC-AGI](https://img.shields.io/badge/Task-ARC--AGI-red)](https://arcprize.org/)
 
-This repository allows reproduction of the blog post [Agentic coding improves ARC AGI 2 performance across models](https://pivotools.github.io/pivotools-quarto-blog/posts/agentic_coding_arc_agi/).
+This repository allows reproduction of the post [Agentic coding improves ARC AGI 2 performance across models](https://pivotools.github.io/pivotools-quarto-blog/posts/agentic_coding_arc_agi/).
+
+We found something surprising about [ARC AGI 2: the visual puzzle benchmark aiming to measure human-like fluid intelligence](https://arcprize.org/arc-agi/2/). Just enabling a **stateful IPython based REPL** via function calling significantly boosts performance across models. We got **> 4x** performance improvement in GPT OSS 120B (high). The effect continues well into frontier territory (GPT 5.2) with double digit gains.
+
+The comparison between plain COT baseline vs. agentic coding (with stateful IPython based REPL) on the ARC AGI 2 public eval set is shown below.
+
+<img width="1536" height="960" alt="image" src="https://github.com/user-attachments/assets/da9cff17-7328-4461-8bbc-77f01e285efc" />
+
+Interleaved thinking, the model capability behind these jumps, seems fragile at the infra/client layer. We had to patch vLLM to get reliable interleaved thinking  from GPT OSS 120B. Please see details [below](#setting-up-vllm-server) and in the accompanying post.
 
 ## 1. Installing
 ```bash
